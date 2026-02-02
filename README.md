@@ -71,7 +71,7 @@ Buka http://localhost:3000
 
 ```
 Email: admin@dinas.go.id
-Password: dinas2024
+Password: admin123
 ```
 
 ⚠️ **Ganti credentials untuk production!** Edit di `/app/api/admin/login/route.ts`
