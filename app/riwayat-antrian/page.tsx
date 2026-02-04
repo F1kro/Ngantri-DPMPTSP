@@ -198,7 +198,7 @@ export default function MyQueueHistoryPage() {
               size="sm" 
               className="h-10 md:h-11 rounded-2xl gap-2 bg-slate-800/50 border-slate-700 text-indigo-400 font-black text-[9px] md:text-xs uppercase px-4 shadow-lg shadow-indigo-500/5 active:scale-95 transition-all border-b-4 border-b-indigo-900/50"
             >
-              <Home size={14} className="md:size-16" />
+              <Home size={14} />
               <span>Kembali ke Dashboard</span>
             </Button>
           </Link>

@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,9 +46,10 @@ export default function ManajemenLayanan() {
   const [services, setServices] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 9;
+  const itemsPerPage = 10;
 
   const [openAdd, setOpenAdd] = useState(false);
   const [openEdit, setOpenEdit] = useState(false);
@@ -79,12 +81,22 @@ export default function ManajemenLayanan() {
     fetchServices();
   }, []);
 
+  // Filter berdasarkan search query
+  const filteredServices = useMemo(() => {
+    const result = services.filter(service => 
+      service.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (service.description && service.description.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
+    setCurrentPage(1); // Reset ke halaman 1 saat search
+    return result;
+  }, [services, searchQuery]);
+
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
-    return services.slice(start, start + itemsPerPage);
-  }, [services, currentPage]);
+    return filteredServices.slice(start, start + itemsPerPage);
+  }, [filteredServices, currentPage]);
 
-  const totalPages = Math.ceil(services.length / itemsPerPage);
+  const totalPages = Math.ceil(filteredServices.length / itemsPerPage);
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,13 +145,10 @@ export default function ManajemenLayanan() {
   };
 
   return (
-    // MODIFIKASI: Ditambahkan h-screen overflow-hidden agar sidebar terkunci
     <div className="flex h-screen w-full bg-[#020617] text-slate-100 overflow-hidden font-sans">
       <Sidebar />
 
-      {/* AREA KANAN: h-full overflow-hidden agar area ini yang handle scroll sendiri */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* AREA KONTEN: overflow-y-auto biar sidebar GAK IKUT SCROLL */}
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 custom-scrollbar">
           {/* HEADER - Tetap Compact (Style Rekap) */}
           <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 font-bold">
@@ -252,6 +261,33 @@ export default function ManajemenLayanan() {
             </Dialog>
           </header>
 
+          {/* TOOLBAR SEARCH - Style Rekap */}
+          <div className="bg-slate-900/40 border border-slate-800 p-4 rounded-3xl backdrop-blur-xl shrink-0">
+            <div className="flex items-end justify-between gap-4">
+              {/* CONTAINER KIRI - SEARCH */}
+              <div className="flex items-end gap-2.5">
+                <div className="w-[280px]">
+                  <label className="flex items-center gap-1.5 text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-1.5">
+                    <Search size={11} className="text-indigo-400"/> Cari Layanan
+                  </label>
+                  <Input 
+                    placeholder="Nama layanan..." 
+                    className="bg-slate-950/50 border-slate-800 h-10 px-3.5 text-white rounded-xl focus:border-indigo-500/50 transition-all text-sm"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* CONTAINER KANAN - TOTAL */}
+              <div className="h-10 flex items-center justify-center px-5 bg-indigo-500/5 border border-indigo-500/10 rounded-xl shrink-0">
+                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">
+                  Total: <span className="text-indigo-400 text-base ml-1 tabular-nums">{filteredServices.length}</span>
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* TABEL DATA - Tetap Compact (Style Rekap) */}
           <div className="flex-1 bg-slate-900/40 border border-slate-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl backdrop-blur-xl">
             <div className="overflow-auto flex-1 custom-scrollbar">
@@ -272,6 +308,14 @@ export default function ManajemenLayanan() {
                         className="py-20 text-center text-indigo-400"
                       >
                         <Loader2 className="animate-spin mx-auto" size={24} />
+                      </td>
+                    </tr>
+                  ) : paginatedData.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="py-12 text-center">
+                        <p className="text-slate-600 font-bold uppercase tracking-widest text-[10px]">
+                          Data tidak ditemukan
+                        </p>
                       </td>
                     </tr>
                   ) : (

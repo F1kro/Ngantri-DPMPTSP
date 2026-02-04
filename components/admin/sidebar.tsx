@@ -70,7 +70,7 @@ export default function AdminSidebar() {
           <div className="p-2 bg-indigo-600 rounded-xl shadow-lg shadow-indigo-500/20">
             <Database size={24} className="text-white" />
           </div>
-          <span className="text-xl font-black uppercase tracking-tighter text-white">Admin DPMPTSP</span>
+          <span className="text-xl font-black uppercase tracking-tighter text-white">ANTRI DPMPTSP</span>
         </div>
         
         {/* Navigasi */}

@@ -64,10 +64,9 @@ export default function BookingPage() {
   }
 
   return (
-    // FIX: Tambahkan overflow-hidden di main untuk kunci layar
     <main className="relative h-screen w-full bg-[#020617] text-slate-100 overflow-hidden flex flex-col items-center">
       
-      {/* BACKGROUND DECOR - FIX: Dibungkus div pointer-events-none agar tidak ganggu klik */}
+      {/* BACKGROUND DECOR */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-1/4 w-[500px] h-[500px] bg-indigo-500/5 blur-[120px] rounded-full" />
       </div>
@@ -145,7 +144,7 @@ export default function BookingPage() {
                     <Briefcase size={12} /> Layanan
                   </Label>
                   <Select onValueChange={val => setFormData({...formData, serviceId: val})}>
-                    <SelectTrigger className="h-12 md:h-14 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm">
+                    <SelectTrigger className="w-full !h-12 md:!h-14 !min-h-[3rem] md:!min-h-[3.5rem] bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm focus:ring-1 focus:ring-indigo-500">
                       <SelectValue placeholder="Pilih Layanan" />
                     </SelectTrigger>
                     <SelectContent className="bg-slate-900 border-slate-800 text-white rounded-2xl max-h-[300px]">
