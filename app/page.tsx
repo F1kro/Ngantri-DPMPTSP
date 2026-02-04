@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -7,8 +7,8 @@ import {
   ClipboardCheck,
   MonitorPlay,
   Zap,
-  ArrowRight,
   MousePointer2,
+  History,
 } from "lucide-react";
 
 export default function Home() {
@@ -38,8 +38,9 @@ export default function Home() {
           </p>
         </section>
 
-        {/* Menu Section */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 max-w-5xl mx-auto">
+        {/* Menu Section - Update Grid to 3 columns on Desktop if you want them side by side, 
+            or keep 2 columns for a more balanced look */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 md:gap-10 max-w-6xl mx-auto">
           <MenuCard
             href="/booking"
             title="Daftar Antrean"
@@ -53,6 +54,14 @@ export default function Home() {
             desc="Pantau nomor antrean yang sedang dilayani secara real-time dari HP Anda."
             icon={<MonitorPlay size={48} />}
             color="blue"
+          />
+          {/* MENU BARU: RIWAYAT */}
+          <MenuCard
+            href="/riwayat-antrian"
+            title="Riwayat Saya"
+            desc="Lihat kembali daftar tiket dan riwayat kunjungan antrean Anda sebelumnya."
+            icon={<History size={48} />}
+            color="emerald"
           />
         </div>
 
@@ -93,7 +102,7 @@ function MenuCard({
   title: string;
   desc: string;
   icon: any;
-  color: "indigo" | "blue";
+  color: "indigo" | "blue" | "emerald";
 }) {
   const styles = {
     indigo: {
@@ -106,30 +115,33 @@ function MenuCard({
       icon: "text-blue-400 bg-blue-500/10",
       button: "bg-blue-600 hover:bg-blue-700 shadow-blue-500/20",
     },
+    emerald: {
+      border: "border-emerald-500/30",
+      icon: "text-emerald-400 bg-emerald-500/10",
+      button: "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20",
+    },
   };
 
   return (
     <Card
-      className={`h-full bg-slate-900/60 ${styles[color].border} backdrop-blur-xl rounded-[3rem] p-8 md:p-10 shadow-2xl transition-all border-2`}
+      className={`h-full bg-slate-900/60 ${styles[color].border} backdrop-blur-xl rounded-[3rem] p-8 md:p-10 shadow-2xl transition-all border-2 flex flex-col`}
     >
-      <CardContent className="p-0 flex flex-col items-center text-center space-y-8">
-        {/* Icon tetap berwarna (Putih/Warna Terang) agar tidak gelap */}
+      <CardContent className="p-0 flex flex-col items-center text-center space-y-8 flex-1">
         <div
           className={`p-6 rounded-[2rem] border-2 ${styles[color].border} ${styles[color].icon} shadow-inner`}
         >
           {icon}
         </div>
 
-        <div className="space-y-4">
-          <h2 className="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter">
+        <div className="space-y-4 flex-1">
+          <h2 className="text-3xl md:text-3xl font-black text-white uppercase tracking-tighter">
             {title}
           </h2>
-          <p className="text-slate-400 text-lg leading-relaxed font-medium">
+          <p className="text-slate-400 text-base md:text-lg leading-relaxed font-medium">
             {desc}
           </p>
         </div>
 
-        {/* Button gede biar ramah jempol & ramah Boomer */}
         <Link href={href} className="w-full">
           <Button
             className={`w-full h-16 rounded-2xl text-lg font-black uppercase tracking-widest shadow-2xl gap-3 transition-transform active:scale-95 ${styles[color].button}`}
