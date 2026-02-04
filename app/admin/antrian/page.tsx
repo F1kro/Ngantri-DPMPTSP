@@ -145,6 +145,7 @@ export default function ManajemenAntrean() {
       if (activeQueue)
         return toast.error("Selesaikan antrean aktif di layanan ini dulu!");
 
+      // Update database dulu
       await supabase
         .from("bookings")
         .update({
@@ -153,17 +154,22 @@ export default function ManajemenAntrean() {
         })
         .eq("id", next.id);
 
-      // Hanya panggil suara robot lokal untuk admin
+      // Panggil suara robot lokal untuk admin
       panggilSuara(next.booking_number);
-
-      // HAPUS BARIS INI: Agar admin tidak memunculkan notifikasi browser sendiri
-      // notifyQueueCalled(next.booking_number);
+      
+      // Delay singkat agar realtime subscription pasti trigger di client
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
     } else if (type === "SELESAI" && activeQueue) {
       await supabase
         .from("bookings")
         .update({ status: "completed" })
         .eq("id", activeQueue.id);
+      
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
     } else if (type === "ULANG" && activeQueue) {
+      // Untuk panggil ulang, update updated_at
       await supabase
         .from("bookings")
         .update({
@@ -171,12 +177,13 @@ export default function ManajemenAntrean() {
         })
         .eq("id", activeQueue.id);
 
-      // Hanya panggil suara robot lokal untuk admin
+      // Panggil suara robot lokal untuk admin
       panggilSuara(activeQueue.booking_number);
-
-      // HAPUS BARIS INI: Agar admin tidak memunculkan notifikasi browser sendiri
-      // notifyQueueCalled(activeQueue.booking_number);
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
+    
+    // Refresh data setelah semua proses selesai
     fetchData();
   };
 
@@ -256,7 +263,6 @@ export default function ManajemenAntrean() {
         </section>
 
         {/* SERVICE PAGINATION */}
-        {/* SERVICE PAGINATION */}
         <div className="flex items-center gap-3 shrink-0 px-1">
           <Button
             disabled={pageService === 1}
@@ -268,7 +274,6 @@ export default function ManajemenAntrean() {
           </Button>
           <div className="flex-1 grid grid-cols-6 gap-3">
             {paginatedServices.map((s) => {
-              // PERBAIKAN DI SINI:
               const count = bookings.filter(
                 (b) =>
                   b.service_id === s.id &&

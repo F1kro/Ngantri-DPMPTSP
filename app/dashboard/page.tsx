@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,6 +74,9 @@ export default function PersonalMonitorPage() {
   const [itemsPerPage, setItemsPerPage] = useState(3);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [userBookingIds, setUserBookingIds] = useState<string[]>([]);
+  
+  // Track previous state untuk deteksi perubahan
+  const prevBookingsRef = useRef<any[]>([]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -124,42 +127,100 @@ export default function PersonalMonitorPage() {
           const updated = payload.new as any;
           const old = payload.old as any;
 
-          // Cek apakah ini booking milik user ini
-          if (userBookingIds.includes(updated.id)) {
-            
-            // 1. DIPANGGIL (Status berubah ke in_progress) atau DIPANGGIL ULANG (updated_at berubah)
-            if (
-              (updated.status === "in_progress" && old.status !== "in_progress") || 
-              (updated.status === "in_progress" && updated.updated_at !== old.updated_at)
-            ) {
-              if (notificationsEnabled) {
-                notifyQueueCalled(updated.booking_number);
-                toast.success(`NOMOR ANDA (${updated.booking_number}) SEDANG DIPANGGIL!`, {
-                  duration: 8000,
-                  icon: <Bell className="text-indigo-500" />
-                });
-              }
-            }
+          console.log("🔔 UPDATE DETECTED:", { 
+            id: updated.id,
+            number: updated.booking_number,
+            oldStatus: old.status, 
+            newStatus: updated.status,
+            oldUpdatedAt: old.updated_at,
+            newUpdatedAt: updated.updated_at,
+            isUserBooking: userBookingIds.includes(updated.id)
+          });
 
-            // 2. REMINDER (Sisa 2 antrean lagi)
-            if (updated.status === "waiting") {
-              const waitingList = bookings
-                .filter(b => b.service_id === updated.service_id && b.status === "waiting")
-                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-              
-              const pos = waitingList.findIndex(b => b.id === updated.id);
-              if (pos === 1 && notificationsEnabled) {
-                notifyQueueReminder(updated.booking_number, 2);
-              }
+          // HANYA proses jika ini booking milik user
+          if (!userBookingIds.includes(updated.id)) {
+            console.log("❌ Bukan booking user, skip");
+            fetchData();
+            return;
+          }
+
+          console.log("✅ Ini booking user!");
+
+          // 1. DETEKSI DIPANGGIL PERTAMA KALI (waiting -> in_progress)
+          if (updated.status === "in_progress" && old.status === "waiting") {
+            console.log("🔊 DIPANGGIL PERTAMA KALI!");
+            
+            if (notificationsEnabled) {
+              notifyQueueCalled(updated.booking_number);
+              toast.success(`NOMOR ANDA (${updated.booking_number}) SEDANG DIPANGGIL!`, {
+                duration: 10000,
+                icon: <Bell className="text-indigo-500" size={24} />
+              });
+            } else {
+              toast.success(`NOMOR ANDA (${updated.booking_number}) SEDANG DIPANGGIL!`, {
+                duration: 10000,
+                icon: <Bell className="text-indigo-500" size={24} />
+              });
             }
           }
+
+          // 2. DETEKSI PANGGIL ULANG (status tetap in_progress, tapi updated_at berubah)
+          else if (
+            updated.status === "in_progress" && 
+            old.status === "in_progress" && 
+            updated.updated_at !== old.updated_at
+          ) {
+            console.log("🔊 DIPANGGIL ULANG!");
+            
+            if (notificationsEnabled) {
+              notifyQueueCalled(updated.booking_number);
+              toast.warning(`NOMOR ANDA (${updated.booking_number}) DIPANGGIL LAGI!`, {
+                duration: 10000,
+                icon: <Bell className="text-orange-500" size={24} />
+              });
+            } else {
+              toast.warning(`NOMOR ANDA (${updated.booking_number}) DIPANGGIL LAGI!`, {
+                duration: 10000,
+                icon: <Bell className="text-orange-500" size={24} />
+              });
+            }
+          }
+
+          // 3. REMINDER - Cek posisi dalam waiting list
+          if (updated.status === "waiting") {
+            // Ambil fresh data untuk hitung posisi akurat
+            supabase
+              .from("bookings")
+              .select("*")
+              .eq("service_id", updated.service_id)
+              .eq("status", "waiting")
+              .order("created_at", { ascending: true })
+              .then(({ data }) => {
+                const waitingList = data || [];
+                const position = waitingList.findIndex(b => b.id === updated.id);
+                
+                console.log(`📊 Posisi dalam antrian: ${position + 1} dari ${waitingList.length}`);
+                
+                // Reminder jika tinggal 2 antrian lagi (posisi index 1)
+                if (position === 1 && notificationsEnabled) {
+                  console.log("⏰ TRIGGER REMINDER - Tinggal 2 antrian!");
+                  notifyQueueReminder(updated.booking_number, 2);
+                  toast.info(`Nomor ${updated.booking_number} - Tinggal 2 antrian lagi!`, {
+                    duration: 8000
+                  });
+                }
+              });
+          }
+
           fetchData();
         }
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [notificationsEnabled, userBookingIds, bookings]);
+    return () => { 
+      supabase.removeChannel(channel); 
+    };
+  }, [notificationsEnabled, userBookingIds]);
 
   const handleToggleNotifications = async () => {
     if (!isNotificationSupported()) {
@@ -174,11 +235,17 @@ export default function PersonalMonitorPage() {
       const permission = await requestNotificationPermission();
       if (permission === "granted") {
         setNotificationsEnabled(true);
-        // Pancing audio agar diizinkan browser
-        const audio = new Audio("/notification.mp3");
+        
+        // PENTING: Pancing audio agar browser mengizinkan autoplay
+        const audio = new Audio("/notif.mp3");
         audio.volume = 0;
         audio.play().catch(() => {});
-        toast.success("Notifikasi aktif! Suara akan berbunyi saat dipanggil.");
+        
+        toast.success("✅ Notifikasi AKTIF! Suara akan berbunyi saat nomor Anda dipanggil.", {
+          duration: 5000
+        });
+      } else {
+        toast.error("Permission ditolak. Aktifkan notifikasi di browser settings.");
       }
     }
   };
@@ -189,7 +256,7 @@ export default function PersonalMonitorPage() {
   return (
     <main className="min-h-screen w-full bg-[#020617] text-slate-100 font-sans p-3 md:p-10 flex flex-col gap-4 md:gap-6 overflow-hidden">
       
-      {/* HEADER SECTION - FIXED LAYOUT PC & MOBILE */}
+      {/* HEADER SECTION */}
       <header className="bg-slate-900/50 p-4 md:p-6 rounded-2xl md:rounded-[2rem] border border-slate-800 backdrop-blur-xl shrink-0 shadow-2xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3 md:gap-4">
