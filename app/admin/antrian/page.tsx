@@ -153,15 +153,17 @@ export default function ManajemenAntrean() {
         })
         .eq("id", next.id);
 
+      // Hanya panggil suara robot lokal untuk admin
       panggilSuara(next.booking_number);
-      notifyQueueCalled(next.booking_number);
+
+      // HAPUS BARIS INI: Agar admin tidak memunculkan notifikasi browser sendiri
+      // notifyQueueCalled(next.booking_number);
     } else if (type === "SELESAI" && activeQueue) {
       await supabase
         .from("bookings")
         .update({ status: "completed" })
         .eq("id", activeQueue.id);
     } else if (type === "ULANG" && activeQueue) {
-      // INI TRIGGERNYA: Update timestamp biar HP user bunyi lagi
       await supabase
         .from("bookings")
         .update({
@@ -169,8 +171,11 @@ export default function ManajemenAntrean() {
         })
         .eq("id", activeQueue.id);
 
+      // Hanya panggil suara robot lokal untuk admin
       panggilSuara(activeQueue.booking_number);
-      notifyQueueCalled(activeQueue.booking_number);
+
+      // HAPUS BARIS INI: Agar admin tidak memunculkan notifikasi browser sendiri
+      // notifyQueueCalled(activeQueue.booking_number);
     }
     fetchData();
   };

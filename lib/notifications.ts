@@ -1,5 +1,5 @@
 // lib/notifications.ts
-// Browser Push Notification Utility
+// Browser Push Notification Utility dengan Fix Audio Status 206
 
 export interface NotificationOptions {
   title: string
@@ -14,7 +14,7 @@ export interface NotificationOptions {
  * Request notification permission dari user
  */
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
-  if (!('Notification' in window)) {
+  if (typeof window === 'undefined' || !('Notification' in window)) {
     console.warn('Browser tidak mendukung notifications')
     return 'denied'
   }
@@ -23,18 +23,16 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
     return 'granted'
   }
 
-  if (Notification.permission !== 'denied') {
-    const permission = await Notification.requestPermission()
-    return permission
-  }
-
-  return Notification.permission
+  const permission = await Notification.requestPermission()
+  return permission
 }
 
 /**
  * Kirim browser notification
  */
 export async function sendNotification(options: NotificationOptions): Promise<void> {
+  if (typeof window === 'undefined') return;
+  
   const permission = await requestNotificationPermission()
 
   if (permission !== 'granted') {
@@ -49,15 +47,12 @@ export async function sendNotification(options: NotificationOptions): Promise<vo
       badge: options.badge || '/badge-icon.png',
       tag: options.tag || 'default',
       requireInteraction: options.requireInteraction || false,
-      vibrate: [200, 100, 200], // Vibrate pattern (jika support)
     })
 
-    // Auto close after 10 seconds (jika requireInteraction = false)
     if (!options.requireInteraction) {
       setTimeout(() => notification.close(), 10000)
     }
 
-    // Event handlers
     notification.onclick = () => {
       window.focus()
       notification.close()
@@ -71,7 +66,7 @@ export async function sendNotification(options: NotificationOptions): Promise<vo
  * Cek apakah browser support notifications
  */
 export function isNotificationSupported(): boolean {
-  return 'Notification' in window
+  return typeof window !== 'undefined' && 'Notification' in window
 }
 
 /**
@@ -83,15 +78,35 @@ export function getNotificationPermission(): NotificationPermission {
 }
 
 /**
- * Play sound notification
+ * Play sound notification - FIX UNTUK STATUS 206 & MOBILE
  */
 export function playNotificationSound(): void {
+  if (typeof window === 'undefined') return;
+
   try {
-    const audio = new Audio('/hidup-jokowi.mp3')
-    audio.volume = 0.5
-    audio.play().catch((err) => {
-      console.warn('Could not play notification sound:', err)
-    })
+    // Gunakan path file yang konsisten
+    const audio = new Audio('/hidup-jokowi.mp3');
+    
+    // SOLUSI STATUS 206: Paksa browser untuk pre-load file audio sepenuhnya
+    audio.load(); 
+    audio.volume = 0.8;
+    audio.preload = "auto";
+
+    const playPromise = audio.play();
+
+    if (playPromise !== undefined) {
+      playPromise.catch((err) => {
+        console.warn('Autoplay diblokir browser atau Partial Content 206 error:', err);
+        
+        // FALLBACK: Gunakan Speech Synthesis (Suara Robot) jika file audio gagal diputar
+        // Ini memastikan user tetap dengar suara walaupun file MP3 error
+        const synth = window.speechSynthesis;
+        const utter = new SpeechSynthesisUtterance("Nomor antrean Anda dipanggil");
+        utter.lang = 'id-ID';
+        utter.volume = 1;
+        synth.speak(utter);
+      });
+    }
   } catch (error) {
     console.error('Error playing notification sound:', error)
   }
@@ -101,14 +116,15 @@ export function playNotificationSound(): void {
  * Notification khusus untuk nomor antrian dipanggil
  */
 export async function notifyQueueCalled(bookingNumber: string): Promise<void> {
+  // Kirim notifikasi teks dulu
   await sendNotification({
     title: '🔔 Nomor Antrian Anda Dipanggil!',
     body: `Nomor ${bookingNumber} - Silakan menuju loket pelayanan sekarang.`,
     tag: `queue-${bookingNumber}`,
-    requireInteraction: true, // User harus klik untuk dismiss
+    requireInteraction: true,
   })
 
-  // Play sound
+  // Baru putar suara
   playNotificationSound()
 }
 
@@ -122,4 +138,7 @@ export async function notifyQueueReminder(bookingNumber: string, queueLeft: numb
     tag: `reminder-${bookingNumber}`,
     requireInteraction: false,
   })
+  
+  // Opsional: Bunyikan suara pelan untuk reminder
+  playNotificationSound()
 }
