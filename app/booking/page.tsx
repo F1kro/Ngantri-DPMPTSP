@@ -74,119 +74,100 @@ export default function BookingPage() {
 
   // Cek jam yang sudah terisi setiap kali tanggal berubah
   useEffect(() => {
-    const fetchBookedSlots = async () => {
-      if (!formData.date) return;
-
-      const { data, error } = await supabase
-        .from("bookings")
-        .select("booking_time")
-        .eq("booking_date", formData.date)
-        .neq("status", "cancelled"); // Jangan hitung yang sudah dibatalkan
-
-      if (data) {
-        setBookedSlots(data.map((b) => b.booking_time));
+      const fetchBookedSlots = async () => {
+        if (!formData.date) return
+        
+        const { data } = await supabase
+          .from('bookings')
+          .select('booking_time')
+          .eq('booking_date', formData.date)
+          .neq('status', 'cancelled'); // Ambil SEMUA yang sudah booking tanpa filter service_id
+  
+        if (data) {
+          setBookedSlots(data.map(b => b.booking_time))
+        }
       }
-    };
-    fetchBookedSlots();
-  }, [formData.date]);
+      fetchBookedSlots()
+    }, [formData.date])
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.serviceId || !formData.time)
-      return toast.error("Lengkapi data jadwal");
-
-    setLoading(true);
-
-    try {
-      // --- 1. DOUBLE CHECK (ANTI-RACE CONDITION) ---
-      // Cek lagi ke database apakah jam ini baru aja diambil orang lain
-      const { data: checkSlot } = await supabase
-        .from("bookings")
-        .select("id")
-        .eq("booking_date", formData.date)
-        .eq("booking_time", formData.time)
-        .eq("service_id", formData.serviceId)
-        .neq("status", "cancelled") // Kecuali yang sudah dibatalkan
-        .single();
-
-      if (checkSlot) {
-        setLoading(false);
-        // Tarik ulang booked slots biar UI update
-        const { data: updatedBooked } = await supabase
-          .from("bookings")
-          .select("booking_time")
-          .eq("booking_date", formData.date)
-          .neq("status", "cancelled");
-
-        if (updatedBooked)
-          setBookedSlots(updatedBooked.map((b) => b.booking_time));
-
-        return toast.error(
-          "Maaf, slot jam ini baru saja diambil orang lain. Silakan pilih jam lain.",
-        );
-      }
-
-      // --- 2. GENERATE NOMOR (Lanjutin logic prefix lo) ---
-      const { data: serviceData } = await supabase
-        .from("services")
-        .select("prefix_code")
-        .eq("id", formData.serviceId)
-        .single();
-
-      const prefix = serviceData?.prefix_code || "A";
-
-      const { count } = await supabase
-        .from("bookings")
-        .select("*", { count: "exact", head: true })
-        .eq("booking_date", formData.date)
-        .eq("service_id", formData.serviceId);
-
-      const num = (count || 0) + 1;
-      const booking_number = `${prefix}-${String(num).padStart(3, "0")}`;
-
-      // --- 3. INSERT DATA ---
-      const { data, error } = await supabase
-        .from("bookings")
-        .insert([
-          {
-            booking_number,
-            visitor_name: formData.name,
-            visitor_phone: formData.phone,
-            service_id: formData.serviceId,
-            booking_date: formData.date,
-            booking_time: formData.time,
-            status: "waiting",
-            queue_position: num,
-          },
-        ])
-        .select();
-
-      if (error) {
-        // Jika kena Constraint UNIQUE dari database (Cara 1 tadi)
-        if (error.code === "23505") {
-          throw new Error("Slot waktu sudah terisi.");
+      e.preventDefault()
+      if (!formData.serviceId) return toast.error("Silakan pilih jenis layanan")
+      if (!formData.time) return toast.error("Silakan pilih jam kedatangan")
+      
+      setLoading(true)
+      
+      try {
+        // --- 1. DOUBLE CHECK SLOT GLOBAL (ANTI-TABRAKAN BEDA LAYANAN) ---
+        const { data: slotTerisi } = await supabase
+          .from('bookings')
+          .select('id')
+          .eq('booking_date', formData.date)
+          .eq('booking_time', formData.time)
+          .neq('status', 'cancelled') // Cari di SEMUA layanan
+          .single();
+  
+        if (slotTerisi) {
+          setLoading(false);
+          // Refresh data tombol biar user tau jam itu udah "FULL"
+          fetchBookedSlots(); 
+          return toast.error("Maaf, jam ini baru saja diambil oleh orang lain (di layanan berbeda). Silakan pilih jam lain.");
         }
-        throw error;
+  
+        // --- 2. GENERATE NOMOR BERDASARKAN PREFIX ---
+        const { data: serviceData } = await supabase
+          .from('services')
+          .select('prefix_code')
+          .eq('id', formData.serviceId)
+          .single();
+          
+        const prefix = serviceData?.prefix_code || 'A';
+  
+        // Hitung total booking hari ini buat nomor urut
+        const { count } = await supabase
+          .from('bookings')
+          .select('*', { count: 'exact', head: true })
+          .eq('booking_date', formData.date);
+        
+        const num = (count || 0) + 1
+        const booking_number = `${prefix}-${String(num).padStart(3, '0')}`
+  
+        // --- 3. INSERT KE DATABASE ---
+        const { data, error } = await supabase.from('bookings').insert([{
+          booking_number,
+          visitor_name: formData.name,
+          visitor_phone: formData.phone,
+          service_id: formData.serviceId,
+          booking_date: formData.date,
+          booking_time: formData.time,
+          status: 'waiting',
+          queue_position: num
+        }]).select()
+  
+        if (error) {
+          // Jika masih tembus race condition (ditolak DB)
+          if (error.code === '23505') throw new Error("Slot waktu sudah terisi.")
+          throw error
+        }
+  
+        if (data && data[0]) {
+          saveBookingToCookie({
+            id: data[0].id,
+            booking_number: data[0].booking_number,
+            created_at: data[0].created_at,
+            booking_date: data[0].booking_date,
+            booking_time: data[0].booking_time
+          })
+          toast.success('Booking berhasil!')
+          router.push(`/booking-confirmation/${data[0].id}`)
+        }
+      } catch (error: any) {
+        console.error('Booking error:', error)
+        toast.error(error.message || 'Gagal membuat booking.')
+      } finally {
+        setLoading(false)
       }
-
-      if (data && data[0]) {
-        saveBookingToCookie({
-          id: data[0].id,
-          booking_number: data[0].booking_number,
-          created_at: data[0].created_at,
-          booking_date: data[0].booking_date,
-          booking_time: data[0].booking_time,
-        });
-        toast.success("Booking berhasil!");
-        router.push(`/booking-confirmation/${data[0].id}`);
-      }
-    } catch (error: any) {
-      console.error("Booking error:", error);
-      toast.error(error.message || "Gagal membuat booking. Silakan coba lagi.");
-    } finally {
-      setLoading(false);
     }
-  };
 
   return (
     <main className="relative min-h-screen w-full bg-[#020617] text-slate-100 flex flex-col items-center">
