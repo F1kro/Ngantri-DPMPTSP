@@ -62,7 +62,7 @@ export default function MyQueueHistoryPage() {
   const supabase = createClient();
   const [bookings, setBookings] = useState<BookingDetail[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mounted, setMounted] = useState(false); // Untuk fix hydration deploy
+  const [mounted, setMounted] = useState(false); // FIX HYDRATION
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<BookingDetail | null>(null);
   const [cancelReason, setCancelReason] = useState("");
@@ -71,29 +71,41 @@ export default function MyQueueHistoryPage() {
   const itemsPerPage = 5;
 
   const fetchBookings = async () => {
-    setLoading(true);
     try {
       const cookieBookings = getBookingsFromCookie();
-      if (cookieBookings.length === 0) { setBookings([]); setLoading(false); return; }
+      if (!cookieBookings || cookieBookings.length === 0) { 
+        setBookings([]); 
+        setLoading(false); 
+        return; 
+      }
+
+      const ids = cookieBookings.map((b: any) => b.id);
       const { data, error } = await supabase
         .from("bookings")
         .select("*, services(name, estimated_duration)")
-        .in("id", cookieBookings.map((b: any) => b.id))
+        .in("id", ids)
         .order("booking_date", { ascending: false })
         .order("booking_time", { ascending: false });
+
       if (error) throw error;
       setBookings(data || []);
-    } catch { toast.error("Gagal memuat riwayat"); }
-    finally { setLoading(false); }
+    } catch (err) {
+      console.error(err);
+      toast.error("Gagal sinkron riwayat");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    setMounted(true);
+    setMounted(true); // Komponen sudah nempel di browser
     fetchBookings();
+
     const ch = supabase
-      .channel("user_history_realtime")
+      .channel("user_history_live")
       .on("postgres_changes", { event: "*", schema: "public", table: "bookings" }, () => fetchBookings())
       .subscribe();
+
     return () => { supabase.removeChannel(ch); };
   }, []);
 
@@ -110,22 +122,26 @@ export default function MyQueueHistoryPage() {
     try {
       const { error } = await supabase
         .from("bookings")
-        .update({ status: "cancelled", cancelled_at: new Date().toISOString(), cancel_reason: cancelReason.trim() })
+        .update({ 
+          status: "cancelled", 
+          cancelled_at: new Date().toISOString(), 
+          cancel_reason: cancelReason.trim() 
+        })
         .eq("id", selectedBooking.id);
       if (error) throw error;
       toast.success("Berhasil dibatalkan");
       setCancelDialogOpen(false);
       setCancelReason("");
       fetchBookings();
-    } catch { toast.error("Gagal membatalkan"); }
-    finally { setCancelling(false); }
+    } catch { 
+      toast.error("Gagal membatalkan"); 
+    } finally { 
+      setCancelling(false); 
+    }
   };
 
-  if (!mounted || loading) return (
-    <main className="min-h-screen bg-[#020617] flex items-center justify-center">
-      <Loader2 className="animate-spin text-indigo-500" size={36} />
-    </main>
-  );
+  // JANGAN RENDER APAPUN SEBELUM MOUNTED UNTUK FIX DEPLOYMENT BUG
+  if (!mounted) return null;
 
   return (
     <main className="min-h-screen bg-[#020617] text-slate-100 flex flex-col">
@@ -136,7 +152,7 @@ export default function MyQueueHistoryPage() {
           </div>
           <div>
             <h1 className="text-sm font-black uppercase tracking-tight leading-none text-white">Riwayat Antrean</h1>
-            <p className="text-[8px] font-bold text-slate-500 uppercase mt-0.5">DPMPTSP Lombok Barat</p>
+            <p className="text-[8px] font-bold text-slate-500 uppercase mt-0.5">DPMPTSP LOBAR</p>
           </div>
         </div>
         <Link href="/">
@@ -147,13 +163,17 @@ export default function MyQueueHistoryPage() {
       </header>
 
       <div className="flex-1 px-4 py-4 space-y-3 max-w-lg mx-auto w-full">
-        {bookings.length === 0 ? (
+        {loading ? (
+          <div className="flex justify-center py-20">
+            <Loader2 className="animate-spin text-indigo-500" size={32} />
+          </div>
+        ) : bookings.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <History size={44} className="text-slate-700 mb-3" />
-            <p className="text-slate-500 font-black uppercase text-xs tracking-widest mb-6">Belum ada antrean</p>
+            <p className="text-slate-500 font-black uppercase text-xs mb-6">Antrean Tidak Ditemukan</p>
             <Link href="/booking">
-              <Button className="bg-indigo-600 hover:bg-indigo-500 rounded-2xl font-black text-xs px-8 h-12">
-                AMBIL ANTREAN
+              <Button className="bg-indigo-600 rounded-2xl font-black text-xs px-8 h-12">
+                AMBIL ANTREAN BARU
               </Button>
             </Link>
           </div>
@@ -182,9 +202,8 @@ export default function MyQueueHistoryPage() {
                         <p className="text-sm font-black text-white uppercase leading-tight truncate pr-1">
                           {booking.services?.name}
                         </p>
-                        <Badge className={`${sc.badge} border font-black text-[7px] uppercase gap-1 px-2 py-1 shrink-0 flex items-center`}>
-                          {sc.icon}
-                          <span className="ml-0.5">{sc.label}</span>
+                        <Badge className={`${sc.badge} border font-black text-[7px] uppercase gap-1 px-2 py-1 flex items-center`}>
+                          {sc.icon} <span className="ml-0.5">{sc.label}</span>
                         </Badge>
                       </div>
 
@@ -205,54 +224,33 @@ export default function MyQueueHistoryPage() {
                     <div className="mx-4 mb-3 flex items-start gap-2.5 p-3 bg-red-500/8 border border-red-500/15 rounded-2xl">
                       <ShieldAlert size={13} className="text-red-400 shrink-0 mt-0.5" />
                       <div>
-                        <p className="text-[7px] font-black text-red-400/70 uppercase tracking-widest">Dibatalkan oleh Petugas</p>
-                        <p className="text-[10px] text-red-300/80 font-bold mt-0.5">{reason}</p>
+                        <p className="text-[7px] font-black text-red-400/70 uppercase">Dibatalkan Admin</p>
+                        <p className="text-[10px] text-red-300/80 font-bold">{reason}</p>
                       </div>
                     </div>
                   )}
 
-                  {booking.status === "cancelled" && !adminBatal && booking.cancel_reason && (
-                    <div className="mx-4 mb-3 flex items-start gap-2.5 p-3 bg-slate-800/40 border border-slate-700/30 rounded-2xl">
-                      <XCircle size={13} className="text-slate-500 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest">Alasan Pembatalan</p>
-                        <p className="text-[10px] text-slate-400 font-bold mt-0.5">{booking.cancel_reason}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {(booking.status !== "cancelled" && booking.status !== "completed") && (
-                    <div className="px-4 pb-4 flex gap-2">
-                      <Link href={`/booking-confirmation/${booking.id}`} className="flex-1">
-                        <Button className="w-full h-11 bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-2xl text-[10px] font-black uppercase gap-1.5 transition-all">
-                          <FileText size={13} /> Lihat Tiket
-                        </Button>
-                      </Link>
-                      {booking.status === "waiting" && (
-                        <Button
-                          variant="ghost"
-                          onClick={() => { setSelectedBooking(booking); setCancelDialogOpen(true); }}
-                          className="h-11 px-4 text-red-500/60 hover:text-red-400 hover:bg-red-500/10 rounded-2xl text-[10px] font-black uppercase"
-                        >
-                          Batalkan
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                  
-                  {booking.status === "completed" && (
-                     <div className="px-4 pb-4 flex gap-2">
-                        <Link href={`/booking-confirmation/${booking.id}`} className="flex-1">
-                          <Button className="w-full h-11 bg-slate-800/50 border border-slate-700 text-slate-400 rounded-2xl text-[10px] font-black uppercase gap-1.5">
-                            <FileText size={13} /> Detail Antrean
-                          </Button>
-                        </Link>
-                     </div>
-                  )}
+                  <div className="px-4 pb-4 flex gap-2">
+                    <Link href={`/booking-confirmation/${booking.id}`} className="flex-1">
+                      <Button className="w-full h-11 bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 rounded-2xl text-[10px] font-black uppercase gap-1.5">
+                        <FileText size={13} /> {booking.status === 'completed' ? 'Detail' : 'Lihat Tiket'}
+                      </Button>
+                    </Link>
+                    {booking.status === "waiting" && (
+                      <Button
+                        variant="ghost"
+                        onClick={() => { setSelectedBooking(booking); setCancelDialogOpen(true); }}
+                        className="h-11 px-4 text-red-500/60 hover:text-red-400 hover:bg-red-500/10 rounded-2xl text-[10px] font-black uppercase"
+                      >
+                        Batal
+                      </Button>
+                    )}
+                  </div>
                 </div>
               );
             })}
 
+            {/* FIX PAGINATION: Pastikan muncul hanya jika totalPages > 1 */}
             {totalPages > 1 && (
               <div className="flex items-center justify-center gap-3 pt-6 pb-10">
                 <Button 
@@ -303,14 +301,14 @@ export default function MyQueueHistoryPage() {
             <div className="p-3 bg-red-500/10 w-fit rounded-2xl text-red-500 border border-red-500/20 mx-auto">
               <XCircle size={26} />
             </div>
-            <DialogTitle className="text-lg font-black uppercase tracking-tight">Batalkan Antrean?</DialogTitle>
+            <DialogTitle className="text-lg font-black uppercase">Batalkan Antrean?</DialogTitle>
             <DialogDescription className="text-[11px] text-slate-500 font-medium">
               Antrean <b className="text-slate-300">{selectedBooking?.booking_number}</b> akan dibatalkan permanen.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <Textarea
-              placeholder="Berikan alasan pembatalan..."
+              placeholder="Alasan pembatalan..."
               className="bg-slate-900 border-slate-800 rounded-2xl resize-none text-xs h-24 text-white p-4"
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
@@ -318,7 +316,7 @@ export default function MyQueueHistoryPage() {
           </div>
           <DialogFooter className="flex flex-col gap-2">
             <Button disabled={cancelling || !cancelReason}
-              className="h-12 bg-red-600 hover:bg-red-500 rounded-2xl font-black text-xs text-white shadow-lg shadow-red-600/20"
+              className="h-12 bg-red-600 hover:bg-red-500 rounded-2xl font-black text-xs text-white"
               onClick={handleCancel}>
               {cancelling ? <Loader2 className="animate-spin" size={15} /> : "YA, BATALKAN"}
             </Button>
