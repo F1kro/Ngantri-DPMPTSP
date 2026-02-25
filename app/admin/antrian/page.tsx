@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/admin/sidebar";
+import { playTTSNotification, VOICE_MALE } from "@/lib/notifications";
 import {
   Volume2,
   CheckCircle2,
@@ -79,6 +80,7 @@ export default function ManajemenAntrean() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
+  const [mounted, setMounted] = useState(false);
   
   // Inisialisasi kosong dulu untuk menghindari mismatch hydration (Server vs Client)
   const [filterDate, setFilterDate] = useState(""); 
@@ -98,6 +100,12 @@ export default function ManajemenAntrean() {
   const itemsPerService = 6;
   const itemsPerWaiting = 5;
   const itemsPerHistory = 3;
+  
+  useEffect(() => {
+    const handler = () => unlockTTS();
+    window.addEventListener('pointerdown', handler, { once: true });
+    return () => window.removeEventListener('pointerdown', handler);
+  }, []);
 
   // Set tanggal WITA saat pertama kali load di client
   useEffect(() => {
@@ -153,16 +161,28 @@ export default function ManajemenAntrean() {
     };
   }, [fetchData, supabase]);
 
-  const panggilSuara = (nomor: string) => {
-    const synth = window.speechSynthesis;
-    const utterance = new SpeechSynthesisUtterance(
-      `Nomor antrean ${nomor.split("").join(" ")}, silakan menuju loket.`
-    );
-    utterance.lang = "id-ID";
-    utterance.rate = 0.8;
-    synth.speak(utterance);
-  };
-
+  // 1. Force Load Voices saat pertama kali masuk
+    useEffect(() => {
+      setMounted(true);
+      setFilterDate(getWitaDateString());
+  
+      const loadVoices = () => {
+        window.speechSynthesis.getVoices();
+      };
+  
+      loadVoices();
+      if (window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+      }
+    }, []);
+  
+    const panggilSuara = async (nomor: string) => {
+      await playTTSNotification(
+        `Nomor antrean ${nomor}, silakan menuju loket.`,
+        VOICE_MALE  // suara pria untuk admin
+      );
+    };
+  
   const activeQueue = useMemo(
     () => bookings.find((b) => b.status === "in_progress" && b.service_id === selectedServiceId),
     [bookings, selectedServiceId]

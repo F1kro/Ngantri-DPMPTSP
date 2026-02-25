@@ -1,15 +1,21 @@
 "use client";
-import { useEffect, useState, useMemo, useRef } from "react";
+
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 import { getBookingsFromCookie } from "@/lib/cookies";
+import { unlockTTS } from "@/lib/notifications";
+
+// 3. Di dalam return, wrap konten dengan kondisi:
+
 import {
   requestNotificationPermission,
   notifyQueueCalled,
   getNotificationPermission,
   isNotificationSupported,
+  playTTSNotification,
 } from "@/lib/notifications";
 import {
   Clock,
@@ -28,7 +34,7 @@ import {
 import Link from "next/link";
 import { toast } from "sonner";
 
-// --- HELPER WITA (Agar sinkron dengan database) ---
+// --- HELPER WITA ---
 const getWitaDateString = () => {
   const now = new Date();
   const witaString = now.toLocaleString("en-US", { timeZone: "Asia/Makassar" });
@@ -39,7 +45,6 @@ const getWitaDateString = () => {
   return `${year}-${month}-${day}`;
 };
 
-// Komponen Timer Mandiri - Diset 30 Menit Fixed
 const MonitorTimer = ({
   startTime,
   durationMinutes,
@@ -78,7 +83,6 @@ const MonitorTimer = ({
   );
 };
 
-// Map alasan dari admin ke pesan yang ramah untuk end user
 const SKIP_REASON_MAP: Record<string, string> = {
   "Orang tidak ada di tempat": "Anda tidak ada di tempat saat dipanggil",
   "Dokumen tidak lengkap": "Dokumen Anda belum lengkap",
@@ -92,6 +96,7 @@ const getSkipReasonDisplay = (notes: string | null) => {
 
 export default function PersonalMonitorPage() {
   const supabase = createClient();
+  const [ttsReady, setTtsReady] = useState(false);
   const [bookings, setBookings] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -99,9 +104,32 @@ export default function PersonalMonitorPage() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [userBookingIds, setUserBookingIds] = useState<string[]>([]);
   const [userBookingDetails, setUserBookingDetails] = useState<any[]>([]);
-
-  const prevBookingStatusRef = useRef<Record<string, { status: string; notes?: string }>>({});
   const [skippedInfo, setSkippedInfo] = useState<Record<string, { reason: string; at: Date }>>({});
+  
+  useEffect(() => {
+    const handler = () => unlockTTS();
+    window.addEventListener('pointerdown', handler, { once: true });
+    return () => window.removeEventListener('pointerdown', handler);
+  }, []);
+
+  // ✅ FIX 1: Refs untuk menghindari stale closure di realtime listener
+  const notificationsEnabledRef = useRef(false);
+  const userBookingIdsRef = useRef<string[]>([]);
+
+  // Sync ref setiap kali state berubah
+  useEffect(() => {
+    notificationsEnabledRef.current = notificationsEnabled;
+  }, [notificationsEnabled]);
+
+  useEffect(() => {
+    userBookingIdsRef.current = userBookingIds;
+  }, [userBookingIds]);
+
+  useEffect(() => {
+    import("@/lib/notifications").then((mod) => {
+      mod.initTTSVoices();
+    });
+  }, []);
 
   useEffect(() => {
     const handleResize = () => {
@@ -112,24 +140,9 @@ export default function PersonalMonitorPage() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // LOAD COOKIES & INITIAL FETCH
-  useEffect(() => {
-    const cookieBookings = getBookingsFromCookie();
-    const ids = cookieBookings.map((b) => b.id);
-    setUserBookingIds(ids);
-    setUserBookingDetails(cookieBookings);
-
-    if (isNotificationSupported()) {
-      setNotificationsEnabled(getNotificationPermission() === "granted");
-    }
-
-    // Jalankan fetch pertama kali setelah ID didapat
-    fetchData(ids);
-  }, []);
-
-  const fetchData = async (currentIds?: string[]) => {
+  // ✅ FIX 2: fetchData pakai useCallback dan tidak bergantung pada state userBookingIds
+  const fetchData = useCallback(async () => {
     const todayWita = getWitaDateString();
-    const idsToUse = currentIds || userBookingIds;
 
     const [bookingRes, serviceRes] = await Promise.all([
       supabase
@@ -141,6 +154,9 @@ export default function PersonalMonitorPage() {
     ]);
 
     const allBookings = bookingRes.data || [];
+    // ✅ Pakai ref, bukan state — selalu fresh
+    const idsToUse = userBookingIdsRef.current;
+
     setBookings(allBookings);
 
     const allServices = serviceRes.data || [];
@@ -156,8 +172,28 @@ export default function PersonalMonitorPage() {
       return 0;
     });
     setServices(sortedServices);
-  };
+  }, [supabase]);
 
+  // LOAD COOKIES & INITIAL FETCH
+  useEffect(() => {
+    const cookieBookings = getBookingsFromCookie();
+    const ids = cookieBookings.map((b: any) => b.id);
+
+    // ✅ Set ref dulu sebelum fetch agar fetchData langsung pakai value terbaru
+    userBookingIdsRef.current = ids;
+    setUserBookingIds(ids);
+    setUserBookingDetails(cookieBookings);
+
+    if (isNotificationSupported()) {
+      const perm = getNotificationPermission();
+      notificationsEnabledRef.current = perm === "granted";
+      setNotificationsEnabled(perm === "granted");
+    }
+
+    fetchData();
+  }, [fetchData]);
+
+  // ✅ FIX 3: Realtime listener — gunakan REF, bukan state langsung
   useEffect(() => {
     const channel = supabase
       .channel("user-live-monitor")
@@ -168,26 +204,51 @@ export default function PersonalMonitorPage() {
           const updated = payload.new as any;
           const old = payload.old as any;
 
+          // Selalu fetch ulang untuk update UI
           fetchData();
 
-          if (!userBookingIds.includes(updated.id)) return;
+          // ✅ Pakai ref, bukan state — tidak stale
+          const currentIds = userBookingIdsRef.current;
+          if (!currentIds.includes(updated.id)) return;
 
-          // LOGIKA NOTIFIKASI & TOAST (Dipanggil/Skip/Cancel)
+          const isNotifEnabled = notificationsEnabledRef.current;
+
+          // KASUS 1: Baru dipanggil (waiting -> in_progress)
           if (updated.status === "in_progress" && old.status === "waiting") {
-            if (notificationsEnabled) notifyQueueCalled(updated.booking_number);
+            if (isNotifEnabled) notifyQueueCalled(updated.booking_number);
+            else {
+              // ✅ FIX: Tetap bunyikan TTS meski notif browser off
+              const nomorEja = updated.booking_number.replace("-", " ").split("").join(" ");
+              playTTSNotification(`Nomor antrean ${nomorEja}, silakan menuju loket pelayanan.`);
+            }
             toast.success(`NOMOR ANDA (${updated.booking_number}) SEDANG DIPANGGIL!`, {
               duration: 10000,
               icon: <Bell className="text-indigo-500" size={24} />,
             });
-          } else if (updated.status === "in_progress" && old.status === "in_progress" && updated.updated_at !== old.updated_at) {
-            if (notificationsEnabled) notifyQueueCalled(updated.booking_number);
+          }
+
+          // ✅ FIX KASUS 2: Panggil Ulang (in_progress -> in_progress, updated_at berubah)
+          // Masalah lama: old.updated_at bisa null dari Supabase Realtime
+          // Fix: cukup cek status sama-sama in_progress, selalu anggap ini panggil ulang
+          else if (updated.status === "in_progress" && old.status === "in_progress") {
+            if (isNotifEnabled) notifyQueueCalled(updated.booking_number);
+            else {
+              const nomorEja = updated.booking_number.replace("-", " ").split("").join(" ");
+              playTTSNotification(`Nomor antrean ${nomorEja}, dipanggil kembali. Silakan menuju loket.`);
+            }
             toast.warning(`NOMOR ANDA (${updated.booking_number}) DIPANGGIL LAGI!`, {
               duration: 10000,
               icon: <Bell className="text-orange-500" size={24} />,
             });
-          } else if (updated.status === "waiting" && old.status === "in_progress") {
+          }
+
+          // KASUS 3: Di-skip (in_progress -> waiting)
+          else if (updated.status === "waiting" && old.status === "in_progress") {
             const reasonDisplay = getSkipReasonDisplay(updated.notes);
-            setSkippedInfo((prev) => ({ ...prev, [updated.id]: { reason: reasonDisplay, at: new Date() } }));
+            setSkippedInfo((prev) => ({
+              ...prev,
+              [updated.id]: { reason: reasonDisplay, at: new Date() },
+            }));
             toast.error(
               <div className="flex flex-col gap-1">
                 <span className="font-black text-sm">Antrean {updated.booking_number} Dilewati</span>
@@ -195,24 +256,35 @@ export default function PersonalMonitorPage() {
               </div>,
               { duration: 15000, icon: <SkipForward className="text-amber-500" size={24} /> }
             );
-          } else if (updated.status === "cancelled") {
-            toast.error(`Antrean ${updated.booking_number} Dibatalkan`, { icon: <AlertCircle className="text-red-500" /> });
+          }
+
+          // KASUS 4: Dibatalkan
+          else if (updated.status === "cancelled") {
+            toast.error(`Antrean ${updated.booking_number} Dibatalkan`, {
+              icon: <AlertCircle className="text-red-500" />,
+            });
           }
         }
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [notificationsEnabled, userBookingIds]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // ✅ Tidak perlu notificationsEnabled/userBookingIds sebagai dependency
+    // karena sudah pakai ref — channel tidak perlu re-subscribe
+  }, [fetchData, supabase]);
 
   const handleToggleNotifications = async () => {
     if (!isNotificationSupported()) return toast.error("Browser tidak mendukung notifikasi");
     if (notificationsEnabled) {
+      notificationsEnabledRef.current = false;
       setNotificationsEnabled(false);
       toast.info("Notifikasi dimatikan");
     } else {
       const permission = await requestNotificationPermission();
       if (permission === "granted") {
+        notificationsEnabledRef.current = true;
         setNotificationsEnabled(true);
         toast.success("✅ Notifikasi AKTIF!");
       }
@@ -220,23 +292,33 @@ export default function PersonalMonitorPage() {
   };
 
   const userHasActiveBookingInService = (serviceId: string) => {
-    return bookings.some((b) => b.service_id === serviceId && userBookingIds.includes(b.id) && b.status !== "completed");
+    return bookings.some(
+      (b) => b.service_id === serviceId && userBookingIdsRef.current.includes(b.id) && b.status !== "completed"
+    );
   };
 
   const totalPages = Math.ceil(services.length / (itemsPerPage || 1));
   const currentServices = services.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-  const activeUserBookingsCount = bookings.filter((b) => userBookingIds.includes(b.id) && b.status !== "completed").length;
+  const activeUserBookingsCount = bookings.filter(
+    (b) => userBookingIdsRef.current.includes(b.id) && b.status !== "completed"
+  ).length;
 
   return (
     <main className="min-h-screen w-full bg-[#020617] text-slate-100 font-sans p-3 md:p-10 flex flex-col gap-4 md:gap-6 overflow-hidden">
       <header className="bg-slate-900/50 p-4 md:p-6 rounded-2xl md:rounded-[2rem] border border-slate-800 backdrop-blur-xl shrink-0 shadow-2xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3 md:gap-4">
-            <div className="p-2.5 md:p-4 bg-indigo-600 rounded-xl md:rounded-2xl shadow-lg text-white"><Ticket size={24} /></div>
+            <div className="p-2.5 md:p-4 bg-indigo-600 rounded-xl md:rounded-2xl shadow-lg text-white">
+              <Ticket size={24} />
+            </div>
             <div>
-              <h1 className="text-base md:text-2xl font-black tracking-tighter uppercase leading-none text-white">Cek Antrean</h1>
+              <h1 className="text-base md:text-2xl font-black tracking-tighter uppercase leading-none text-white">
+                Cek Antrean
+              </h1>
               <div className="flex items-center gap-2 mt-1 md:mt-1.5">
-                <p className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">Sistem Antrian Online DPMPTSP - LOBAR</p>
+                <p className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                  Sistem Antrian Online DPMPTSP - LOBAR
+                </p>
                 <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-500/10 border border-red-500/20 rounded-full">
                   <span className="h-1.5 w-1.5 bg-red-500 rounded-full animate-pulse" />
                   <span className="text-[7px] md:text-[9px] font-black text-red-500 uppercase">Live</span>
@@ -246,15 +328,29 @@ export default function PersonalMonitorPage() {
           </div>
           <div className="flex items-center gap-2 md:gap-3">
             <Link href="/" className="hidden xs:block">
-              <Button variant="outline" className="h-10 md:h-12 px-4 md:px-6 rounded-xl bg-slate-800 border-slate-700 text-slate-300 font-bold text-[10px] md:text-xs uppercase gap-2"><Home size={16} /><span>Dashboard</span></Button>
+              <Button variant="outline" className="h-10 md:h-12 px-4 md:px-6 rounded-xl bg-slate-800 border-slate-700 text-slate-300 font-bold text-[10px] md:text-xs uppercase gap-2">
+                <Home size={16} />
+                <span>Dashboard</span>
+              </Button>
             </Link>
-            <Button onClick={handleToggleNotifications} variant="outline" className={`h-10 md:h-12 px-4 md:px-6 rounded-xl font-bold text-[10px] md:text-xs uppercase gap-2 flex-1 md:flex-none transition-all ${notificationsEnabled ? "bg-emerald-600/20 border-emerald-600/30 text-emerald-400" : "bg-slate-800 border-slate-700 text-slate-400"}`}>
+            <Button
+              onClick={handleToggleNotifications}
+              variant="outline"
+              className={`h-10 md:h-12 px-4 md:px-6 rounded-xl font-bold text-[10px] md:text-xs uppercase gap-2 flex-1 md:flex-none transition-all ${
+                notificationsEnabled
+                  ? "bg-emerald-600/20 border-emerald-600/30 text-emerald-400"
+                  : "bg-slate-800 border-slate-700 text-slate-400"
+              }`}
+            >
               {notificationsEnabled ? <Bell size={16} /> : <BellOff size={16} />}
               <span>{notificationsEnabled ? "Notif On" : "Notif Off"}</span>
             </Button>
             {userBookingIds.length > 0 && (
               <Link href="/riwayat-antrian" className="flex-1 md:flex-none">
-                <Button variant="outline" className="w-full h-10 md:h-12 px-4 md:px-6 rounded-xl bg-indigo-600/20 border-indigo-600/30 text-indigo-400 font-bold text-[10px] md:text-xs uppercase gap-2"><HistoryIcon size={16} /><span>Riwayat</span></Button>
+                <Button variant="outline" className="w-full h-10 md:h-12 px-4 md:px-6 rounded-xl bg-indigo-600/20 border-indigo-600/30 text-indigo-400 font-bold text-[10px] md:text-xs uppercase gap-2">
+                  <HistoryIcon size={16} />
+                  <span>Riwayat</span>
+                </Button>
               </Link>
             )}
           </div>
@@ -264,66 +360,138 @@ export default function PersonalMonitorPage() {
       {activeUserBookingsCount > 0 && (
         <div className="bg-indigo-600/10 border-2 border-indigo-600/30 p-3 md:p-4 rounded-xl flex items-center gap-3 shrink-0 shadow-lg shadow-indigo-500/5">
           <Star size={20} className="text-indigo-400 fill-indigo-400" />
-          <p className="text-xs md:text-sm font-black text-indigo-300 uppercase tracking-tight">Layanan Anda Diprioritaskan!</p>
+          <p className="text-xs md:text-sm font-black text-indigo-300 uppercase tracking-tight">
+            Layanan Anda Diprioritaskan!
+          </p>
         </div>
       )}
 
       <div className="flex items-center justify-between gap-4 bg-slate-900/40 p-2 rounded-xl border border-slate-800 shrink-0 shadow-xl">
-        <Button disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)} className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-colors"><ChevronLeft /></Button>
-        <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Hal {currentPage} / {totalPages}</h3>
-        <Button disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)} className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-colors"><ChevronRight /></Button>
+        <Button
+          disabled={currentPage === 1}
+          onClick={() => setCurrentPage((p) => p - 1)}
+          className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-colors"
+        >
+          <ChevronLeft />
+        </Button>
+        <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+          Hal {currentPage} / {totalPages}
+        </h3>
+        <Button
+          disabled={currentPage >= totalPages}
+          onClick={() => setCurrentPage((p) => p + 1)}
+          className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-colors"
+        >
+          <ChevronRight />
+        </Button>
       </div>
 
-      <div className={`flex-1 grid gap-4 md:gap-6 ${itemsPerPage === 1 ? "grid-cols-1" : "grid-cols-3"} min-h-0 overflow-hidden`}>
+      <div
+        className={`flex-1 grid gap-4 md:gap-6 ${
+          itemsPerPage === 1 ? "grid-cols-1" : "grid-cols-3"
+        } min-h-0 overflow-hidden`}
+      >
         {currentServices.map((service) => {
-          const current = bookings.find((b) => b.service_id === service.id && b.status === "in_progress");
-          const waiting = bookings.filter((b) => b.service_id === service.id && b.status === "waiting");
-          const isUserBooking = current && userBookingIds.includes(current.id);
+          const current = bookings.find(
+            (b) => b.service_id === service.id && b.status === "in_progress"
+          );
+          const waiting = bookings.filter(
+            (b) => b.service_id === service.id && b.status === "waiting"
+          );
+          const isUserBooking = current && userBookingIdsRef.current.includes(current.id);
           const hasUserBookingInService = userHasActiveBookingInService(service.id);
-          const userBookingInService = bookings.find((b) => b.service_id === service.id && userBookingIds.includes(b.id) && b.status !== "completed");
-          const userSkippedBooking = bookings.find((b) => b.service_id === service.id && userBookingIds.includes(b.id) && b.status === "waiting" && skippedInfo[b.id]);
+          const userBookingInService = bookings.find(
+            (b) =>
+              b.service_id === service.id &&
+              userBookingIdsRef.current.includes(b.id) &&
+              b.status !== "completed"
+          );
+          const userSkippedBooking = bookings.find(
+            (b) =>
+              b.service_id === service.id &&
+              userBookingIdsRef.current.includes(b.id) &&
+              b.status === "waiting" &&
+              skippedInfo[b.id]
+          );
 
           return (
-            <Card key={service.id} className={`bg-slate-900/60 border-slate-800 rounded-2xl md:rounded-[2.5rem] flex flex-col shadow-2xl border-2 transition-all h-full ${isUserBooking ? "border-indigo-500 ring-2 ring-indigo-500/50" : userSkippedBooking ? "border-amber-500/40 ring-1 ring-amber-500/20" : hasUserBookingInService ? "border-indigo-600/40 ring-1 ring-indigo-600/20" : "border-transparent"}`}>
+            <Card
+              key={service.id}
+              className={`bg-slate-900/60 border-slate-800 rounded-2xl md:rounded-[2.5rem] flex flex-col shadow-2xl border-2 transition-all h-full ${
+                isUserBooking
+                  ? "border-indigo-500 ring-2 ring-indigo-500/50"
+                  : userSkippedBooking
+                  ? "border-amber-500/40 ring-1 ring-amber-500/20"
+                  : hasUserBookingInService
+                  ? "border-indigo-600/40 ring-1 ring-indigo-600/20"
+                  : "border-transparent"
+              }`}
+            >
               <CardContent className="p-0 flex flex-col h-full">
                 <div className="p-3 md:p-5 bg-slate-950/50 border-b border-slate-800 flex justify-between items-center">
                   <div className="flex items-center gap-2 overflow-hidden">
-                    <Badge variant="outline" className="bg-indigo-600/10 text-indigo-400 border-indigo-500/20 font-black px-2 py-0.5">{service.prefix_code || "A"}</Badge>
-                    <h3 className="font-black uppercase text-[10px] text-indigo-400 truncate">{service.name}</h3>
+                    <Badge variant="outline" className="bg-indigo-600/10 text-indigo-400 border-indigo-500/20 font-black px-2 py-0.5">
+                      {service.prefix_code || "A"}
+                    </Badge>
+                    <h3 className="font-black uppercase text-[10px] text-indigo-400 truncate">
+                      {service.name}
+                    </h3>
                   </div>
                   {current && <div className="h-2 w-2 bg-emerald-500 rounded-full animate-ping" />}
                 </div>
 
                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4">
                   <div className="space-y-1">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Antrean Sekarang</p>
-                    <h2 className={`text-6xl md:text-[8rem] font-black font-mono leading-none ${isUserBooking ? "text-indigo-400" : "text-white"}`}>
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                      Antrean Sekarang
+                    </p>
+                    <h2
+                      className={`text-6xl md:text-[8rem] font-black font-mono leading-none ${
+                        isUserBooking ? "text-indigo-400" : "text-white"
+                      }`}
+                    >
                       {current?.booking_number || "---"}
                     </h2>
                   </div>
-                  {current && <MonitorTimer startTime={current.updated_at} durationMinutes={30} />}
+                  {current && (
+                    <MonitorTimer startTime={current.updated_at} durationMinutes={30} />
+                  )}
                   <div className="w-full p-4 bg-slate-950/50 rounded-2xl border border-slate-800/50 flex items-center gap-4">
-                    <div className="h-10 w-10 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-400 shrink-0"><User size={20} /></div>
+                    <div className="h-10 w-10 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-400 shrink-0">
+                      <User size={20} />
+                    </div>
                     <div className="text-left overflow-hidden">
                       <p className="text-[8px] font-black text-slate-600 uppercase">Sedang Melayani</p>
-                      <p className="text-sm font-black text-white uppercase truncate">{current?.visitor_name || "Menunggu..."}</p>
+                      <p className="text-sm font-black text-white uppercase truncate">
+                        {current?.visitor_name || "Menunggu..."}
+                      </p>
                     </div>
                   </div>
 
-                  {userBookingInService && userBookingInService.status === "waiting" && !userSkippedBooking && (
-                    <div className="w-full p-3 bg-indigo-600/10 border border-indigo-600/20 rounded-xl flex justify-between items-center">
-                      <p className="text-[8px] font-black text-indigo-400 uppercase">No. Anda: {userBookingInService.booking_number}</p>
-                      <Badge className="bg-indigo-600 text-[10px]">SISA {waiting.findIndex((b) => b.id === userBookingInService.id) + 1} LAGI</Badge>
-                    </div>
-                  )}
+                  {userBookingInService &&
+                    userBookingInService.status === "waiting" &&
+                    !userSkippedBooking && (
+                      <div className="w-full p-3 bg-indigo-600/10 border border-indigo-600/20 rounded-xl flex justify-between items-center">
+                        <p className="text-[8px] font-black text-indigo-400 uppercase">
+                          No. Anda: {userBookingInService.booking_number}
+                        </p>
+                        <Badge className="bg-indigo-600 text-[10px]">
+                          SISA {waiting.findIndex((b: any) => b.id === userBookingInService.id) + 1} LAGI
+                        </Badge>
+                      </div>
+                    )}
 
                   {userSkippedBooking && skippedInfo[userSkippedBooking.id] && (
                     <div className="w-full space-y-2">
                       <div className="w-full p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-3 text-left">
                         <SkipForward size={16} className="text-amber-400 mt-0.5 shrink-0" />
                         <div>
-                          <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest">Antrean Dilewati</p>
-                          <p className="text-[10px] text-amber-300 font-bold">{skippedInfo[userSkippedBooking.id].reason}</p>
+                          <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest">
+                            Antrean Dilewati
+                          </p>
+                          <p className="text-[10px] text-amber-300 font-bold">
+                            {skippedInfo[userSkippedBooking.id].reason}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -337,7 +505,9 @@ export default function PersonalMonitorPage() {
                   </div>
                   <div className="border-l border-slate-800">
                     <p className="text-[8px] font-black text-slate-600 uppercase">Estimasi</p>
-                    <p className="text-3xl font-black text-emerald-400 font-mono">{waiting.length * 30}m</p>
+                    <p className="text-3xl font-black text-emerald-400 font-mono">
+                      {waiting.length * 30}m
+                    </p>
                   </div>
                 </div>
               </CardContent>
@@ -345,6 +515,6 @@ export default function PersonalMonitorPage() {
           );
         })}
       </div>
-    </main>
+      </main>
   );
 }
