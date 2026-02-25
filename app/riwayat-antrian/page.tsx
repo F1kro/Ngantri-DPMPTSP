@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   History, ChevronLeft, ChevronRight, Home, Loader2,
   Clock, CheckCircle2, XCircle, AlertCircle, Calendar,
-  FileText, ShieldAlert, SkipForward, ChevronDown,
+  FileText, ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -47,12 +47,11 @@ const getCancelReason = (b: BookingDetail) => {
   return b.cancel_reason || b.notes || "Tidak ada keterangan";
 };
 
-// Status config
 const STATUS_CONFIG: Record<string, { label: string; dot: string; badge: string; icon: React.ReactNode }> = {
   waiting:    { label: "Menunggu",          dot: "bg-amber-500",  badge: "bg-amber-500/10 text-amber-400 border-amber-500/20",   icon: <Clock size={11} /> },
   in_progress:{ label: "Sedang Dilayani",   dot: "bg-indigo-500", badge: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",icon: <AlertCircle size={11} /> },
   completed:  { label: "Selesai",           dot: "bg-emerald-500",badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", icon: <CheckCircle2 size={11} /> },
-  cancelled:  { label: "Dibatalkan",        dot: "bg-red-500",    badge: "bg-red-500/10 text-red-400 border-red-400/20",         icon: <XCircle size={11} /> },
+  cancelled:  { label: "Dibatalkan",        dot: "bg-red-500",    badge: "bg-red-500/10 text-red-400 border-red-400/20",           icon: <XCircle size={11} /> },
   cancelled_admin: { label: "Dibatalkan Admin", dot: "bg-red-600", badge: "bg-red-600/10 text-red-400 border-red-500/30",        icon: <ShieldAlert size={11} /> },
 };
 
@@ -96,7 +95,10 @@ export default function MyQueueHistoryPage() {
     return () => { supabase.removeChannel(ch); };
   }, []);
 
+  // Perhitungan total halaman berdasarkan seluruh data bookings
   const totalPages = Math.ceil(bookings.length / itemsPerPage);
+
+  // Filter data yang tampil sesuai halaman aktif
   const paginatedBookings = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return bookings.slice(start, start + itemsPerPage);
@@ -127,8 +129,6 @@ export default function MyQueueHistoryPage() {
 
   return (
     <main className="min-h-screen bg-[#020617] text-slate-100 flex flex-col">
-
-      {/* Sticky Header */}
       <header className="sticky top-0 z-30 bg-[#020617]/95 backdrop-blur-xl border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="p-2 bg-indigo-600 rounded-xl shrink-0">
@@ -146,9 +146,7 @@ export default function MyQueueHistoryPage() {
         </Link>
       </header>
 
-      {/* Content */}
       <div className="flex-1 px-4 py-4 space-y-3 max-w-lg mx-auto w-full">
-
         {bookings.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <History size={44} className="text-slate-700 mb-3" />
@@ -173,21 +171,17 @@ export default function MyQueueHistoryPage() {
                     adminBatal ? "border-red-500/20" : booking.status === "in_progress" ? "border-indigo-500/30" : "border-slate-800/80"
                   }`}
                 >
-                  {/* Card Top */}
                   <div className="p-4 flex items-start gap-3">
-                    {/* Nomor badge */}
                     <div className="bg-slate-950 rounded-2xl px-3 py-2.5 text-center border border-slate-800 shrink-0 min-w-[64px]">
                       <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5">No</p>
                       <p className="text-xl font-black font-mono text-indigo-400 leading-none">{booking.booking_number}</p>
                     </div>
 
-                    {/* Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <p className="text-sm font-black text-white uppercase leading-tight truncate pr-1">
                           {booking.services?.name}
                         </p>
-                        {/* Status badge */}
                         <Badge className={`${sc.badge} border font-black text-[7px] uppercase gap-1 px-2 py-1 shrink-0 flex items-center`}>
                           {sc.icon}
                           <span className="ml-0.5">{sc.label}</span>
@@ -207,7 +201,6 @@ export default function MyQueueHistoryPage() {
                     </div>
                   </div>
 
-                  {/* Alasan pembatalan admin */}
                   {booking.status === "cancelled" && adminBatal && (
                     <div className="mx-4 mb-3 flex items-start gap-2.5 p-3 bg-red-500/8 border border-red-500/15 rounded-2xl">
                       <ShieldAlert size={13} className="text-red-400 shrink-0 mt-0.5" />
@@ -218,7 +211,6 @@ export default function MyQueueHistoryPage() {
                     </div>
                   )}
 
-                  {/* Alasan pembatalan user */}
                   {booking.status === "cancelled" && !adminBatal && booking.cancel_reason && (
                     <div className="mx-4 mb-3 flex items-start gap-2.5 p-3 bg-slate-800/40 border border-slate-700/30 rounded-2xl">
                       <XCircle size={13} className="text-slate-500 shrink-0 mt-0.5" />
@@ -229,16 +221,13 @@ export default function MyQueueHistoryPage() {
                     </div>
                   )}
 
-                  {/* Actions */}
-                  {(booking.status !== "cancelled" || booking.status === "waiting") && (
+                  {(booking.status !== "cancelled" && booking.status !== "completed") && (
                     <div className="px-4 pb-4 flex gap-2">
-                      {booking.status !== "cancelled" && (
-                        <Link href={`/booking-confirmation/${booking.id}`} className="flex-1">
-                          <Button className="w-full h-11 bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-2xl text-[10px] font-black uppercase gap-1.5 transition-all">
-                            <FileText size={13} /> Lihat Tiket
-                          </Button>
-                        </Link>
-                      )}
+                      <Link href={`/booking-confirmation/${booking.id}`} className="flex-1">
+                        <Button className="w-full h-11 bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-2xl text-[10px] font-black uppercase gap-1.5 transition-all">
+                          <FileText size={13} /> Lihat Tiket
+                        </Button>
+                      </Link>
                       {booking.status === "waiting" && (
                         <Button
                           variant="ghost"
@@ -250,26 +239,57 @@ export default function MyQueueHistoryPage() {
                       )}
                     </div>
                   )}
+                  {/* Tampilkan tiket jika sudah selesai */}
+                  {booking.status === "completed" && (
+                     <div className="px-4 pb-4 flex gap-2">
+                        <Link href={`/booking-confirmation/${booking.id}`} className="flex-1">
+                          <Button className="w-full h-11 bg-slate-800/50 border border-slate-700 text-slate-400 rounded-2xl text-[10px] font-black uppercase gap-1.5">
+                            <FileText size={13} /> Detail Antrean
+                          </Button>
+                        </Link>
+                     </div>
+                  )}
                 </div>
               );
             })}
 
-            {/* Pagination */}
+            {/* Pagination UI - Sekarang Terlihat Karena totalPages Dihitung Benar */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-center gap-3 pt-2 pb-6">
-                <Button disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}
-                  variant="outline" size="icon" className="h-9 w-9 rounded-xl bg-slate-900 border-slate-800">
+              <div className="flex items-center justify-center gap-3 pt-6 pb-10">
+                <Button 
+                  disabled={currentPage === 1} 
+                  onClick={() => {
+                    setCurrentPage((p) => p - 1);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  variant="outline" size="icon" className="h-9 w-9 rounded-xl bg-slate-900 border-slate-700"
+                >
                   <ChevronLeft size={15} />
                 </Button>
+                
                 <div className="flex items-center gap-1.5">
                   {Array.from({ length: totalPages }).map((_, i) => (
-                    <button key={i} onClick={() => setCurrentPage(i + 1)}
-                      className={`rounded-full transition-all duration-200 ${currentPage === i + 1 ? "w-5 h-2 bg-indigo-500" : "w-2 h-2 bg-slate-700"}`}
+                    <button 
+                      key={i} 
+                      onClick={() => {
+                        setCurrentPage(i + 1);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className={`rounded-full transition-all duration-300 ${
+                        currentPage === i + 1 ? "w-6 h-2 bg-indigo-500" : "w-2 h-2 bg-slate-700"
+                      }`}
                     />
                   ))}
                 </div>
-                <Button disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)}
-                  variant="outline" size="icon" className="h-9 w-9 rounded-xl bg-slate-900 border-slate-800">
+
+                <Button 
+                  disabled={currentPage === totalPages} 
+                  onClick={() => {
+                    setCurrentPage((p) => p + 1);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  variant="outline" size="icon" className="h-9 w-9 rounded-xl bg-slate-900 border-slate-700"
+                >
                   <ChevronRight size={15} />
                 </Button>
               </div>
@@ -278,7 +298,6 @@ export default function MyQueueHistoryPage() {
         )}
       </div>
 
-      {/* Dialog Batalkan */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
         <DialogContent className="bg-slate-950 border-slate-800 text-white rounded-[2rem] max-w-[92vw] sm:max-w-sm p-6 shadow-2xl">
           <DialogHeader className="space-y-3 text-center">
@@ -311,7 +330,6 @@ export default function MyQueueHistoryPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
     </main>
   );
 }
