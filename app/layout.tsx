@@ -10,8 +10,8 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: 'Sistem Antrian Dinas Penanaman Modal dan Perizinan',
-  description: 'Layanan booking antrian online untuk dinas penanaman modal dan perizinan satu pintu. Sistem hybrid online-offline untuk kemudahan akses.',
-  generator: 'v0.app',
+  description: 'Layanan booking antrian online untuk dinas penanaman modal dan perizinan satu pintu',
+  generator: 'Fiqro Najiah',
   icons: {
     icon: [
       {

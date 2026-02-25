@@ -8,13 +8,11 @@ import { getBookingsFromCookie } from "@/lib/cookies";
 import {
   requestNotificationPermission,
   notifyQueueCalled,
-  notifyQueueReminder,
   getNotificationPermission,
   isNotificationSupported,
 } from "@/lib/notifications";
 import {
   Clock,
-  Activity,
   ChevronLeft,
   ChevronRight,
   User,
@@ -24,6 +22,8 @@ import {
   History as HistoryIcon,
   Star,
   Home,
+  SkipForward,
+  AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -47,7 +47,6 @@ const MonitorTimer = ({
       const diff = Math.max(0, Math.floor((end - now) / 1000));
       setTimeLeft(diff);
     };
-
     calculate();
     const interval = setInterval(calculate, 1000);
     return () => clearInterval(interval);
@@ -68,6 +67,18 @@ const MonitorTimer = ({
   );
 };
 
+// Map alasan dari admin ke pesan yang ramah untuk end user
+const SKIP_REASON_MAP: Record<string, string> = {
+  "Orang tidak ada di tempat": "Anda tidak ada di tempat saat dipanggil",
+  "Dokumen tidak lengkap": "Dokumen Anda belum lengkap",
+  "Minta reschedule": "Anda meminta penjadwalan ulang",
+};
+
+const getSkipReasonDisplay = (notes: string | null) => {
+  if (!notes) return "Antrean Anda dilewati oleh petugas";
+  return SKIP_REASON_MAP[notes] || notes;
+};
+
 export default function PersonalMonitorPage() {
   const supabase = createClient();
   const [bookings, setBookings] = useState<any[]>([]);
@@ -77,6 +88,12 @@ export default function PersonalMonitorPage() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [userBookingIds, setUserBookingIds] = useState<string[]>([]);
   const [userBookingDetails, setUserBookingDetails] = useState<any[]>([]);
+
+  // Menyimpan status snapshot booking user sebelumnya untuk deteksi perubahan
+  const prevBookingStatusRef = useRef<Record<string, { status: string; notes?: string }>>({});
+
+  // State untuk menyimpan info skip per booking id
+  const [skippedInfo, setSkippedInfo] = useState<Record<string, { reason: string; at: Date }>>({});
 
   useEffect(() => {
     const handleResize = () => {
@@ -91,15 +108,15 @@ export default function PersonalMonitorPage() {
     const cookieBookings = getBookingsFromCookie();
     setUserBookingIds(cookieBookings.map((b) => b.id));
     setUserBookingDetails(cookieBookings);
-    
+
     if (isNotificationSupported()) {
       setNotificationsEnabled(getNotificationPermission() === "granted");
     }
   }, []);
 
   const fetchData = async () => {
-    const today = new Date().toISOString().split('T')[0];
-    
+    const today = new Date().toISOString().split("T")[0];
+
     const [bookingRes, serviceRes] = await Promise.all([
       supabase
         .from("bookings")
@@ -111,16 +128,19 @@ export default function PersonalMonitorPage() {
 
     const allBookings = bookingRes.data || [];
     setBookings(allBookings);
+
     const allServices = serviceRes.data || [];
-    
-    const sortedServices = allServices.sort((a, b) => {
-      const userHasBookingA = allBookings.some(bk => bk.service_id === a.id && userBookingIds.includes(bk.id) && bk.status !== "completed");
-      const userHasBookingB = allBookings.some(bk => bk.service_id === b.id && userBookingIds.includes(bk.id) && bk.status !== "completed");
-      if (userHasBookingA && !userHasBookingB) return -1;
-      if (!userHasBookingA && userHasBookingB) return 1;
+    const sortedServices = allServices.sort((a: any, b: any) => {
+      const userHasA = allBookings.some(
+        (bk) => bk.service_id === a.id && userBookingIds.includes(bk.id) && bk.status !== "completed"
+      );
+      const userHasB = allBookings.some(
+        (bk) => bk.service_id === b.id && userBookingIds.includes(bk.id) && bk.status !== "completed"
+      );
+      if (userHasA && !userHasB) return -1;
+      if (!userHasA && userHasB) return 1;
       return 0;
     });
-
     setServices(sortedServices);
   };
 
@@ -140,25 +160,78 @@ export default function PersonalMonitorPage() {
 
           if (!userBookingIds.includes(updated.id)) return;
 
+          const prev = prevBookingStatusRef.current[updated.id];
+
+          // ✅ Dipanggil pertama kali (waiting → in_progress)
           if (updated.status === "in_progress" && old.status === "waiting") {
             if (notificationsEnabled) notifyQueueCalled(updated.booking_number);
             toast.success(`NOMOR ANDA (${updated.booking_number}) SEDANG DIPANGGIL!`, {
               duration: 10000,
-              icon: <Bell className="text-indigo-500" size={24} />
+              icon: <Bell className="text-indigo-500" size={24} />,
             });
           }
-          else if (updated.status === "in_progress" && old.status === "in_progress" && updated.updated_at !== old.updated_at) {
+          // ✅ Dipanggil ulang (in_progress → in_progress, updated_at berubah)
+          else if (
+            updated.status === "in_progress" &&
+            old.status === "in_progress" &&
+            updated.updated_at !== old.updated_at
+          ) {
             if (notificationsEnabled) notifyQueueCalled(updated.booking_number);
             toast.warning(`NOMOR ANDA (${updated.booking_number}) DIPANGGIL LAGI!`, {
               duration: 10000,
-              icon: <Bell className="text-orange-500" size={24} />
+              icon: <Bell className="text-orange-500" size={24} />,
             });
           }
+          // ✅ DI-SKIP: in_progress → waiting (admin menekan Skip)
+          else if (updated.status === "waiting" && old.status === "in_progress") {
+            const reasonDisplay = getSkipReasonDisplay(updated.notes);
+
+            // Simpan info skip ke state agar ditampilkan di card
+            setSkippedInfo((prev) => ({
+              ...prev,
+              [updated.id]: { reason: reasonDisplay, at: new Date() },
+            }));
+
+            toast.error(
+              <div className="flex flex-col gap-1">
+                <span className="font-black text-sm">Antrean {updated.booking_number} Dilewati</span>
+                <span className="text-xs text-slate-300">{reasonDisplay}</span>
+                <span className="text-[10px] text-slate-400 mt-1">Silakan tetap menunggu, Anda akan dipanggil kembali.</span>
+              </div>,
+              { duration: 15000, icon: <SkipForward className="text-amber-500" size={24} /> }
+            );
+
+            if (notificationsEnabled && "Notification" in window) {
+              new Notification(`Antrean ${updated.booking_number} Dilewati`, {
+                body: `${reasonDisplay}. Silakan tetap menunggu.`,
+                icon: "/icon.png",
+              });
+            }
+          }
+          // ✅ Dibatalkan
+          else if (updated.status === "cancelled") {
+            const reasonDisplay = getSkipReasonDisplay(updated.notes);
+            toast.error(
+              <div className="flex flex-col gap-1">
+                <span className="font-black text-sm">Antrean {updated.booking_number} Dibatalkan</span>
+                <span className="text-xs text-slate-300">{reasonDisplay}</span>
+              </div>,
+              { duration: 15000, icon: <AlertCircle className="text-red-500" size={24} /> }
+            );
+          }
+
+          // Update snapshot status
+          prevBookingStatusRef.current[updated.id] = {
+            status: updated.status,
+            notes: updated.notes,
+          };
         }
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [notificationsEnabled, userBookingIds]);
 
   const handleToggleNotifications = async () => {
@@ -170,7 +243,9 @@ export default function PersonalMonitorPage() {
       const permission = await requestNotificationPermission();
       if (permission === "granted") {
         setNotificationsEnabled(true);
-        const audio = new Audio("/notif.mp3"); audio.volume = 0; audio.play().catch(() => {});
+        const audio = new Audio("/notif.mp3");
+        audio.volume = 0;
+        audio.play().catch(() => {});
         toast.success("✅ Notifikasi AKTIF!");
       } else {
         toast.error("Permission ditolak.");
@@ -179,16 +254,23 @@ export default function PersonalMonitorPage() {
   };
 
   const userHasActiveBookingInService = (serviceId: string) => {
-    return bookings.some(b => b.service_id === serviceId && userBookingIds.includes(b.id) && b.status !== "completed");
+    return bookings.some(
+      (b) => b.service_id === serviceId && userBookingIds.includes(b.id) && b.status !== "completed"
+    );
   };
 
   const totalPages = Math.ceil(services.length / (itemsPerPage || 1));
-  const currentServices = services.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-  const activeUserBookingsCount = bookings.filter(b => userBookingIds.includes(b.id) && b.status !== "completed").length;
+  const currentServices = services.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+  const activeUserBookingsCount = bookings.filter(
+    (b) => userBookingIds.includes(b.id) && b.status !== "completed"
+  ).length;
 
   return (
     <main className="min-h-screen w-full bg-[#020617] text-slate-100 font-sans p-3 md:p-10 flex flex-col gap-4 md:gap-6 overflow-hidden">
-      
+
       <header className="bg-slate-900/50 p-4 md:p-6 rounded-2xl md:rounded-[2rem] border border-slate-800 backdrop-blur-xl shrink-0 shadow-2xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3 md:gap-4">
@@ -196,9 +278,13 @@ export default function PersonalMonitorPage() {
               <Ticket size={24} />
             </div>
             <div>
-              <h1 className="text-base md:text-2xl font-black tracking-tighter uppercase leading-none text-white">Cek Antrean</h1>
+              <h1 className="text-base md:text-2xl font-black tracking-tighter uppercase leading-none text-white">
+                Cek Antrean
+              </h1>
               <div className="flex items-center gap-2 mt-1 md:mt-1.5">
-                <p className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">Sistem Antrian Online DPMPTSP - LOBAR</p>
+                <p className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                  Sistem Antrian Online DPMPTSP - LOBAR
+                </p>
                 <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-500/10 border border-red-500/20 rounded-full">
                   <span className="h-1.5 w-1.5 bg-red-500 rounded-full animate-pulse" />
                   <span className="text-[7px] md:text-[9px] font-black text-red-500 uppercase">Live</span>
@@ -208,7 +294,6 @@ export default function PersonalMonitorPage() {
           </div>
 
           <div className="flex items-center gap-2 md:gap-3">
-            {/* BUTTON DASHBOARD */}
             <Link href="/" className="hidden xs:block">
               <Button variant="outline" className="h-10 md:h-12 px-4 md:px-6 rounded-xl bg-slate-800 border-slate-700 text-slate-300 font-bold text-[10px] md:text-xs uppercase gap-2">
                 <Home size={16} />
@@ -220,7 +305,9 @@ export default function PersonalMonitorPage() {
               onClick={handleToggleNotifications}
               variant="outline"
               className={`h-10 md:h-12 px-4 md:px-6 rounded-xl font-bold text-[10px] md:text-xs uppercase gap-2 flex-1 md:flex-none transition-all ${
-                notificationsEnabled ? "bg-emerald-600/20 border-emerald-600/30 text-emerald-400" : "bg-slate-800 border-slate-700 text-slate-400"
+                notificationsEnabled
+                  ? "bg-emerald-600/20 border-emerald-600/30 text-emerald-400"
+                  : "bg-slate-800 border-slate-700 text-slate-400"
               }`}
             >
               {notificationsEnabled ? <Bell size={16} /> : <BellOff size={16} />}
@@ -242,61 +329,160 @@ export default function PersonalMonitorPage() {
       {activeUserBookingsCount > 0 && (
         <div className="bg-indigo-600/10 border-2 border-indigo-600/30 p-3 md:p-4 rounded-xl flex items-center gap-3 shrink-0 shadow-lg shadow-indigo-500/5">
           <Star size={20} className="text-indigo-400 fill-indigo-400" />
-          <p className="text-xs md:text-sm font-black text-indigo-300 uppercase tracking-tight">Layanan Anda Diprioritaskan!</p>
+          <p className="text-xs md:text-sm font-black text-indigo-300 uppercase tracking-tight">
+            Layanan Anda Diprioritaskan!
+          </p>
         </div>
       )}
 
       <div className="flex items-center justify-between gap-4 bg-slate-900/40 p-2 rounded-xl border border-slate-800 shrink-0 shadow-xl">
-        <Button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-colors"><ChevronLeft /></Button>
-        <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Hal {currentPage} / {totalPages}</h3>
-        <Button disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)} className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-colors"><ChevronRight /></Button>
+        <Button
+          disabled={currentPage === 1}
+          onClick={() => setCurrentPage((p) => p - 1)}
+          className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-colors"
+        >
+          <ChevronLeft />
+        </Button>
+        <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+          Hal {currentPage} / {totalPages}
+        </h3>
+        <Button
+          disabled={currentPage >= totalPages}
+          onClick={() => setCurrentPage((p) => p + 1)}
+          className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-colors"
+        >
+          <ChevronRight />
+        </Button>
       </div>
 
       <div className={`flex-1 grid gap-4 md:gap-6 ${itemsPerPage === 1 ? "grid-cols-1" : "grid-cols-3"} min-h-0 overflow-hidden`}>
         {currentServices.map((service) => {
-          const current = bookings.find(b => b.service_id === service.id && b.status === "in_progress");
-          const waiting = bookings.filter(b => b.service_id === service.id && b.status === "waiting");
+          const current = bookings.find(
+            (b) => b.service_id === service.id && b.status === "in_progress"
+          );
+          const waiting = bookings.filter(
+            (b) => b.service_id === service.id && b.status === "waiting"
+          );
           const isUserBooking = current && userBookingIds.includes(current.id);
           const hasUserBookingInService = userHasActiveBookingInService(service.id);
-          const userBookingInService = bookings.find(b => b.service_id === service.id && userBookingIds.includes(b.id) && b.status !== "completed");
+          const userBookingInService = bookings.find(
+            (b) =>
+              b.service_id === service.id &&
+              userBookingIds.includes(b.id) &&
+              b.status !== "completed"
+          );
+
+          // Cek apakah booking user di service ini pernah di-skip
+          const userSkippedBooking = bookings.find(
+            (b) =>
+              b.service_id === service.id &&
+              userBookingIds.includes(b.id) &&
+              b.status === "waiting" &&
+              skippedInfo[b.id]
+          );
 
           return (
-            <Card key={service.id} className={`bg-slate-900/60 border-slate-800 rounded-2xl md:rounded-[2.5rem] flex flex-col shadow-2xl border-2 transition-all h-full ${isUserBooking ? "border-indigo-500 ring-2 ring-indigo-500/50" : hasUserBookingInService ? "border-indigo-600/40 ring-1 ring-indigo-600/20" : "border-transparent"}`}>
+            <Card
+              key={service.id}
+              className={`bg-slate-900/60 border-slate-800 rounded-2xl md:rounded-[2.5rem] flex flex-col shadow-2xl border-2 transition-all h-full ${
+                isUserBooking
+                  ? "border-indigo-500 ring-2 ring-indigo-500/50"
+                  : userSkippedBooking
+                  ? "border-amber-500/40 ring-1 ring-amber-500/20"
+                  : hasUserBookingInService
+                  ? "border-indigo-600/40 ring-1 ring-indigo-600/20"
+                  : "border-transparent"
+              }`}
+            >
               <CardContent className="p-0 flex flex-col h-full">
+                {/* HEADER CARD */}
                 <div className="p-3 md:p-5 bg-slate-950/50 border-b border-slate-800 flex justify-between items-center">
                   <div className="flex items-center gap-2 overflow-hidden">
-                    <Badge variant="outline" className="bg-indigo-600/10 text-indigo-400 border-indigo-500/20 font-black px-2 py-0.5">{service.prefix_code || 'A'}</Badge>
-                    <h3 className="font-black uppercase text-[10px] text-indigo-400 truncate">{service.name}</h3>
+                    <Badge
+                      variant="outline"
+                      className="bg-indigo-600/10 text-indigo-400 border-indigo-500/20 font-black px-2 py-0.5"
+                    >
+                      {service.prefix_code || "A"}
+                    </Badge>
+                    <h3 className="font-black uppercase text-[10px] text-indigo-400 truncate">
+                      {service.name}
+                    </h3>
                   </div>
                   {current && <div className="h-2 w-2 bg-emerald-500 rounded-full animate-ping" />}
                 </div>
 
+                {/* BODY CARD */}
                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4">
                   <div className="space-y-1">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Antrean Sekarang</p>
-                    <h2 className={`text-6xl md:text-[8rem] font-black font-mono leading-none ${isUserBooking ? "text-indigo-400" : "text-white"}`}>
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                      Antrean Sekarang
+                    </p>
+                    <h2
+                      className={`text-6xl md:text-[8rem] font-black font-mono leading-none ${
+                        isUserBooking ? "text-indigo-400" : "text-white"
+                      }`}
+                    >
                       {current?.booking_number || "---"}
                     </h2>
                   </div>
 
-                  {current && <MonitorTimer startTime={current.updated_at} durationMinutes={30} />}
+                  {current && (
+                    <MonitorTimer startTime={current.updated_at} durationMinutes={30} />
+                  )}
 
                   <div className="w-full p-4 bg-slate-950/50 rounded-2xl border border-slate-800/50 flex items-center gap-4">
-                    <div className="h-10 w-10 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-400 shrink-0"><User size={20} /></div>
+                    <div className="h-10 w-10 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-400 shrink-0">
+                      <User size={20} />
+                    </div>
                     <div className="text-left overflow-hidden">
                       <p className="text-[8px] font-black text-slate-500 uppercase">Sedang Melayani</p>
-                      <p className="text-sm font-black text-white uppercase truncate">{current?.visitor_name || "Menunggu..."}</p>
+                      <p className="text-sm font-black text-white uppercase truncate">
+                        {current?.visitor_name || "Menunggu..."}
+                      </p>
                     </div>
                   </div>
 
-                  {userBookingInService && userBookingInService.status === "waiting" && (
+                  {/* STATUS NORMAL: Menunggu giliran */}
+                  {userBookingInService && userBookingInService.status === "waiting" && !userSkippedBooking && (
                     <div className="w-full p-3 bg-indigo-600/10 border border-indigo-600/20 rounded-xl flex justify-between items-center">
-                      <p className="text-[8px] font-black text-indigo-400 uppercase">Nomor Anda: {userBookingInService.booking_number}</p>
-                      <Badge className="bg-indigo-600 text-[10px]">SISA {waiting.findIndex(b => b.id === userBookingInService.id) + 1} LAGI</Badge>
+                      <p className="text-[8px] font-black text-indigo-400 uppercase">
+                        Nomor Anda: {userBookingInService.booking_number}
+                      </p>
+                      <Badge className="bg-indigo-600 text-[10px]">
+                        SISA {waiting.findIndex((b) => b.id === userBookingInService.id) + 1} LAGI
+                      </Badge>
+                    </div>
+                  )}
+
+                  {/* ✅ STATUS SKIP: Booking user di-skip oleh admin */}
+                  {userSkippedBooking && skippedInfo[userSkippedBooking.id] && (
+                    <div className="w-full space-y-2">
+                      {/* Banner skip */}
+                      <div className="w-full p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-3">
+                        <SkipForward size={16} className="text-amber-400 mt-0.5 shrink-0" />
+                        <div className="text-left">
+                          <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest">
+                            Antrean Anda Dilewati
+                          </p>
+                          <p className="text-[10px] text-amber-300 font-bold mt-0.5">
+                            {skippedInfo[userSkippedBooking.id].reason}
+                          </p>
+                        </div>
+                      </div>
+                      {/* Info tetap antri */}
+                      <div className="w-full p-3 bg-slate-800/50 border border-slate-700/50 rounded-xl flex justify-between items-center">
+                        <p className="text-[8px] font-black text-slate-400 uppercase">
+                          No. Anda: {userSkippedBooking.booking_number}
+                        </p>
+                        <Badge className="bg-slate-700 text-slate-300 text-[9px]">
+                          MASIH ANTRI
+                        </Badge>
+                      </div>
                     </div>
                   )}
                 </div>
 
+                {/* FOOTER CARD */}
                 <div className="p-6 bg-slate-950/50 border-t border-slate-800 grid grid-cols-2 gap-4 text-center">
                   <div>
                     <p className="text-[8px] font-black text-slate-600 uppercase">Sisa</p>

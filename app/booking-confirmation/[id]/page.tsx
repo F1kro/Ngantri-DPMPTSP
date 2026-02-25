@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
-import { CheckCircle2, Monitor, Clock, Download, Calendar } from 'lucide-react'
+import { CheckCircle2, Monitor, Clock, Download, Calendar, HomeIcon } from 'lucide-react'
 
 interface BookingDetail {
   id: string
@@ -193,7 +193,14 @@ export default function BookingConfirmationPage() {
         <div className="print:hidden">
           <Link href="/" className="w-full block">
             <Button className="w-full h-14 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl gap-3 uppercase text-[10px] shadow-xl">
-              <Monitor size={18}/> Kembali ke Beranda
+              <HomeIcon size={18}/> Kembali ke Beranda
+            </Button>
+          </Link>
+        </div>
+        <div className="print:hidden">
+          <Link href="/dashboard" className="w-full block">
+            <Button className="w-full h-14 bg-blue-400 hover:bg-blue-300 text-white font-black rounded-xl gap-3 uppercase text-[10px] shadow-xl">
+              <Monitor size={18}/> Cek Live Antrian
             </Button>
           </Link>
         </div>
