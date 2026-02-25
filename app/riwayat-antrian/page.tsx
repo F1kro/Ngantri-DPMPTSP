@@ -62,6 +62,7 @@ export default function MyQueueHistoryPage() {
   const supabase = createClient();
   const [bookings, setBookings] = useState<BookingDetail[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false); // Untuk fix hydration deploy
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<BookingDetail | null>(null);
   const [cancelReason, setCancelReason] = useState("");
@@ -87,6 +88,7 @@ export default function MyQueueHistoryPage() {
   };
 
   useEffect(() => {
+    setMounted(true);
     fetchBookings();
     const ch = supabase
       .channel("user_history_realtime")
@@ -95,10 +97,8 @@ export default function MyQueueHistoryPage() {
     return () => { supabase.removeChannel(ch); };
   }, []);
 
-  // Perhitungan total halaman berdasarkan seluruh data bookings
   const totalPages = Math.ceil(bookings.length / itemsPerPage);
 
-  // Filter data yang tampil sesuai halaman aktif
   const paginatedBookings = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return bookings.slice(start, start + itemsPerPage);
@@ -121,7 +121,7 @@ export default function MyQueueHistoryPage() {
     finally { setCancelling(false); }
   };
 
-  if (loading) return (
+  if (!mounted || loading) return (
     <main className="min-h-screen bg-[#020617] flex items-center justify-center">
       <Loader2 className="animate-spin text-indigo-500" size={36} />
     </main>
@@ -239,7 +239,7 @@ export default function MyQueueHistoryPage() {
                       )}
                     </div>
                   )}
-                  {/* Tampilkan tiket jika sudah selesai */}
+                  
                   {booking.status === "completed" && (
                      <div className="px-4 pb-4 flex gap-2">
                         <Link href={`/booking-confirmation/${booking.id}`} className="flex-1">
@@ -253,7 +253,6 @@ export default function MyQueueHistoryPage() {
               );
             })}
 
-            {/* Pagination UI - Sekarang Terlihat Karena totalPages Dihitung Benar */}
             {totalPages > 1 && (
               <div className="flex items-center justify-center gap-3 pt-6 pb-10">
                 <Button 
