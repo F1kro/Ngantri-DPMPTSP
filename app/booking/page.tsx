@@ -28,7 +28,7 @@ import {
 import Link from "next/link";
 import { toast } from "sonner";
 
-// --- LOGIKA WAKTU WITA (JANGAN DIUBAH) ---
+// --- LOGIKA WAKTU WITA ---
 const getWitaNow = () => {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Makassar" }));
 };
@@ -63,28 +63,33 @@ export default function BookingPage() {
     time: "",
   });
 
-  // Ticker tiap 30 detik biar slot "LEWAT" otomatis
+  // Ticker tiap 30 detik biar slot "LEWAT" otomatis update tanpa refresh
   useEffect(() => {
     const tick = () => setNow(getWitaNow());
     const id = setInterval(tick, 30000);
     return () => clearInterval(id);
   }, []);
 
+  // Ambil data layanan
   useEffect(() => {
     supabase.from("services").select("*").order("name").then(({ data }) => setServices(data || []));
   }, []);
 
+  // AMBIL SLOT YANG TERISI (Kecuali yang dicancel)
   const fetchBookedSlots = async () => {
     if (!formData.date) return;
     const { data } = await supabase
       .from("bookings")
       .select("booking_time")
       .eq("booking_date", formData.date)
-      .neq("status", "cancelled");
+      .neq("status", "cancelled"); // Jika dicancel admin, slot jadi tersedia lagi
+
     if (data) setBookedSlots(data.map((b) => b.booking_time));
   };
 
-  useEffect(() => { fetchBookedSlots(); }, [formData.date]);
+  useEffect(() => { 
+    fetchBookedSlots(); 
+  }, [formData.date]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,27 +97,39 @@ export default function BookingPage() {
 
     setLoading(true);
     try {
-      // Validasi jam WITA sebelum submit
+      // 1. Validasi Waktu (WITA)
       const isToday = formData.date === getWitaDateString(now);
       if (isToday) {
         const [h, m] = formData.time.split(":").map(Number);
-        if ((h * 60 + m) <= (now.getHours() * 60 + now.getMinutes())) {
-          throw new Error("Slot ini sudah lewat bos!");
+        const slotMins = h * 60 + m;
+        const nowMins = now.getHours() * 60 + now.getMinutes();
+        if (slotMins <= nowMins) {
+          throw new Error("Waktu sudah lewat, pilih jam lain!");
         }
       }
 
-      const { data: slotTerisi } = await supabase.from("bookings").select("id").eq("booking_date", formData.date).eq("booking_time", formData.time).neq("status", "cancelled").single();
+      // 2. Cek apakah slot masih tersedia (Double check anti-bentrok)
+      const { data: slotTerisi } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("booking_date", formData.date)
+        .eq("booking_time", formData.time)
+        .neq("status", "cancelled")
+        .single();
+
       if (slotTerisi) {
         fetchBookedSlots();
-        throw new Error("Slot baru saja diambil orang!");
+        throw new Error("Slot baru saja diambil orang lain!");
       }
 
+      // 3. Ambil data prefix & hitung antrean
       const { data: sData } = await supabase.from("services").select("prefix_code").eq("id", formData.serviceId).single();
       const { count } = await supabase.from("bookings").select("*", { count: "exact", head: true }).eq("booking_date", formData.date);
       
       const num = (count || 0) + 1;
       const booking_number = `${sData?.prefix_code || "A"}-${String(num).padStart(3, "0")}`;
 
+      // 4. Insert data ke Supabase
       const { data, error } = await supabase.from("bookings").insert([{
         booking_number,
         visitor_name: formData.name,
@@ -124,7 +141,12 @@ export default function BookingPage() {
         queue_position: num,
       }]).select();
 
-      if (error) throw error;
+      if (error) {
+        // Handle error unique constraint dari postgres
+        if (error.code === "23505") throw new Error("Slot ini sudah dipesan orang lain!");
+        throw error;
+      }
+
       if (data?.[0]) {
         saveBookingToCookie({ ...data[0] });
         toast.success("Booking berhasil!");
@@ -132,6 +154,7 @@ export default function BookingPage() {
       }
     } catch (error: any) {
       toast.error(error.message);
+      fetchBookedSlots(); // Refresh slot jika gagal
     } finally {
       setLoading(false);
     }
@@ -157,12 +180,13 @@ export default function BookingPage() {
         <div className="space-y-6 pb-10">
           <div className="text-center space-y-2">
             <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tighter">Reservasi Jadwal</h2>
-            <p className="text-slate-400 text-[11px] md:text-sm font-medium italic">Pilih waktu kedatangan yang tersedia.</p>
+            <p className="text-slate-400 text-[11px] md:text-sm font-medium italic">Pilih waktu kedatangan (WITA) yang tersedia.</p>
           </div>
 
           <Card className="bg-slate-900/40 border-slate-800 backdrop-blur-xl shadow-2xl rounded-[2.5rem] overflow-hidden border-2">
             <CardContent className="p-6 md:p-10">
               <form onSubmit={handleSubmit} className="space-y-5">
+                {/* Inputs */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><User size={12} /> Nama</Label>
@@ -174,11 +198,13 @@ export default function BookingPage() {
                   </div>
                 </div>
 
+                {/* Tanggal */}
                 <div className="space-y-2">
                   <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Calendar size={12} /> Tanggal Kedatangan</Label>
                   <Input type="date" min={getWitaDateString(getWitaNow())} className="h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value, time: "" })} required />
                 </div>
 
+                {/* Layanan */}
                 <div className="space-y-2">
                   <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Briefcase size={12} /> Layanan</Label>
                   <Select onValueChange={(val) => setFormData({ ...formData, serviceId: val })}>
@@ -189,6 +215,7 @@ export default function BookingPage() {
                   </Select>
                 </div>
 
+                {/* Grid Slot Waktu */}
                 <div className="space-y-2">
                   <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Clock size={12} /> Jam Tersedia</Label>
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -199,11 +226,16 @@ export default function BookingPage() {
                         const [sH, sM] = slot.split(":").map(Number);
                         return (sH * 60 + sM) <= (now.getHours() * 60 + now.getMinutes());
                       })();
+                      
                       const isDisabled = isBooked || isPast;
                       const isSelected = formData.time === slot;
 
                       return (
-                        <button key={slot} type="button" disabled={isDisabled} onClick={() => setFormData({ ...formData, time: slot })}
+                        <button 
+                          key={slot} 
+                          type="button" 
+                          disabled={isDisabled} 
+                          onClick={() => setFormData({ ...formData, time: slot })}
                           className={`py-3 rounded-xl text-[10px] font-black transition-all border-b-4 ${
                             isDisabled ? "bg-slate-800/20 border-slate-900 text-slate-600 cursor-not-allowed opacity-50" :
                             isSelected ? "bg-indigo-600 border-indigo-800 text-white scale-95" :
@@ -211,14 +243,19 @@ export default function BookingPage() {
                           }`}
                         >
                           {slot}
-                          <span className="block text-[7px] opacity-60">{isBooked ? "FULL" : isPast ? "LEWAT" : "READY"}</span>
+                          <span className="block text-[7px] opacity-60">
+                            {isBooked ? "FULL" : isPast ? "LEWAT" : "READY"}
+                          </span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
 
-                <Button disabled={loading || !formData.time} className="w-full h-14 bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest rounded-2xl shadow-xl mt-4 border-b-4 border-b-indigo-800">
+                <Button 
+                  disabled={loading || !formData.time} 
+                  className="w-full h-14 bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest rounded-2xl shadow-xl mt-4 border-b-4 border-b-indigo-800"
+                >
                   {loading ? <Loader2 className="animate-spin" /> : "KONFIRMASI JADWAL"}
                 </Button>
               </form>
