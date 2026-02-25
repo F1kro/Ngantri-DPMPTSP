@@ -11,19 +11,22 @@ export interface UserBooking {
 
 export function saveBookingToCookie(booking: UserBooking): void {
   try {
-    const existing = getBookingsFromCookie()
-    const isDuplicate = existing.some(b => b.id === booking.id)
-    if (isDuplicate) return
+    const existing = getBookingsFromCookie();
+    if (existing.some(b => b.id === booking.id)) return;
 
-    const updated = [booking, ...existing]
-    const limited = updated.slice(0, 50)
+    const updated = [booking, ...existing].slice(0, 50);
+    const expires = new Date();
+    expires.setDate(expires.getDate() + COOKIE_EXPIRY_DAYS);
     
-    const expires = new Date()
-    expires.setDate(expires.getDate() + COOKIE_EXPIRY_DAYS)
+    // Logic deteksi HTTPS/Production
+    const isProd = typeof window !== 'undefined' && window.location.protocol === 'https:';
     
-    document.cookie = `${COOKIE_NAME}=${encodeURIComponent(JSON.stringify(limited))}; expires=${expires.toUTCString()}; path=/; SameSite=Strict`
+    // PAKAI LAX DAN SECURE (WAJIB BUAT HP)
+    document.cookie = `${COOKIE_NAME}=${encodeURIComponent(JSON.stringify(updated))}; expires=${expires.toUTCString()}; path=/; SameSite=Lax${isProd ? '; Secure' : ''}`;
+    
+    console.log("Cookie saved successfully!");
   } catch (error) {
-    console.error('Error saving booking to cookie:', error)
+    console.error('Error saving cookie:', error);
   }
 }
 
