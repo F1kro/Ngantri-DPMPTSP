@@ -28,7 +28,18 @@ import {
 import Link from "next/link";
 import { toast } from "sonner";
 
-// Daftar 14 slot waktu
+// --- LOGIKA WAKTU WITA (JANGAN DIUBAH) ---
+const getWitaNow = () => {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Makassar" }));
+};
+
+const getWitaDateString = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const TIME_SLOTS = [
   "08:00", "08:30", "09:00", "09:30", "10:00", "10:30",
   "11:00", "11:30", "13:00", "13:30", "14:00", "14:30",
@@ -42,125 +53,85 @@ export default function BookingPage() {
   const [services, setServices] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [bookedSlots, setBookedSlots] = useState<string[]>([]);
-  const [now, setNow] = useState<Date>(new Date());
+  const [now, setNow] = useState<Date>(getWitaNow());
 
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
     serviceId: "",
-    date: new Date().toISOString().split("T")[0],
+    date: getWitaDateString(getWitaNow()),
     time: "",
   });
 
-  // 1. Tick setiap 30 detik agar slot "lewat" langsung ter-disable tanpa perlu refresh
+  // Ticker tiap 30 detik biar slot "LEWAT" otomatis
   useEffect(() => {
-    const tick = () => setNow(new Date());
-    tick();
+    const tick = () => setNow(getWitaNow());
     const id = setInterval(tick, 30000);
     return () => clearInterval(id);
   }, []);
 
-  // 2. Load Services
   useEffect(() => {
-    supabase
-      .from("services")
-      .select("*")
-      .order("name")
-      .then(({ data }) => setServices(data || []));
+    supabase.from("services").select("*").order("name").then(({ data }) => setServices(data || []));
   }, []);
 
-  // 3. Fetch Booked Slots
   const fetchBookedSlots = async () => {
     if (!formData.date) return;
-
     const { data } = await supabase
       .from("bookings")
       .select("booking_time")
       .eq("booking_date", formData.date)
       .neq("status", "cancelled");
-
-    if (data) {
-      setBookedSlots(data.map((b) => b.booking_time));
-    }
+    if (data) setBookedSlots(data.map((b) => b.booking_time));
   };
 
-  useEffect(() => {
-    fetchBookedSlots();
-  }, [formData.date]);
+  useEffect(() => { fetchBookedSlots(); }, [formData.date]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.serviceId) return toast.error("Silakan pilih jenis layanan");
-    if (!formData.time) return toast.error("Silakan pilih jam kedatangan");
+    if (!formData.serviceId || !formData.time) return toast.error("Lengkapi data!");
 
     setLoading(true);
-
     try {
-      // Double check slot
-      const { data: slotTerisi } = await supabase
-        .from("bookings")
-        .select("id")
-        .eq("booking_date", formData.date)
-        .eq("booking_time", formData.time)
-        .neq("status", "cancelled")
-        .single();
+      // Validasi jam WITA sebelum submit
+      const isToday = formData.date === getWitaDateString(now);
+      if (isToday) {
+        const [h, m] = formData.time.split(":").map(Number);
+        if ((h * 60 + m) <= (now.getHours() * 60 + now.getMinutes())) {
+          throw new Error("Slot ini sudah lewat bos!");
+        }
+      }
 
+      const { data: slotTerisi } = await supabase.from("bookings").select("id").eq("booking_date", formData.date).eq("booking_time", formData.time).neq("status", "cancelled").single();
       if (slotTerisi) {
-        setLoading(false);
         fetchBookedSlots();
-        return toast.error("Maaf, jam ini baru saja diambil orang lain.");
+        throw new Error("Slot baru saja diambil orang!");
       }
 
-      const { data: serviceData } = await supabase
-        .from("services")
-        .select("prefix_code")
-        .eq("id", formData.serviceId)
-        .single();
-
-      const prefix = serviceData?.prefix_code || "A";
-
-      const { count } = await supabase
-        .from("bookings")
-        .select("*", { count: "exact", head: true })
-        .eq("booking_date", formData.date);
-
+      const { data: sData } = await supabase.from("services").select("prefix_code").eq("id", formData.serviceId).single();
+      const { count } = await supabase.from("bookings").select("*", { count: "exact", head: true }).eq("booking_date", formData.date);
+      
       const num = (count || 0) + 1;
-      const booking_number = `${prefix}-${String(num).padStart(3, "0")}`;
+      const booking_number = `${sData?.prefix_code || "A"}-${String(num).padStart(3, "0")}`;
 
-      const { data, error } = await supabase
-        .from("bookings")
-        .insert([
-          {
-            booking_number,
-            visitor_name: formData.name,
-            visitor_phone: formData.phone,
-            service_id: formData.serviceId,
-            booking_date: formData.date,
-            booking_time: formData.time,
-            status: "waiting",
-            queue_position: num,
-          },
-        ])
-        .select();
+      const { data, error } = await supabase.from("bookings").insert([{
+        booking_number,
+        visitor_name: formData.name,
+        visitor_phone: formData.phone,
+        service_id: formData.serviceId,
+        booking_date: formData.date,
+        booking_time: formData.time,
+        status: "waiting",
+        queue_position: num,
+      }]).select();
 
-      if (error) {
-        if (error.code === "23505") throw new Error("Slot waktu sudah terisi.");
-        throw error;
-      }
-
-      if (data && data[0]) {
-        saveBookingToCookie({
-          id: data[0].id,
-          booking_number: data[0].booking_number,
-          created_at: data[0].created_at,
-          booking_date: data[0].booking_date,
-          booking_time: data[0].booking_time,
-        });
+      if (error) throw error;
+      if (data?.[0]) {
+        saveBookingToCookie({ ...data[0] });
         toast.success("Booking berhasil!");
         router.push(`/booking-confirmation/${data[0].id}`);
       }
     } catch (error: any) {
-      toast.error(error.message || "Gagal membuat booking.");
+      toast.error(error.message);
     } finally {
       setLoading(false);
     }
@@ -173,159 +144,81 @@ export default function BookingPage() {
       </div>
 
       <div className="w-full max-w-xl z-10 p-4 md:p-8 flex flex-col gap-6 md:gap-8">
-        {/* HEADER */}
         <header className="flex items-center justify-between bg-slate-900/60 p-3 md:p-4 rounded-3xl border border-slate-800 backdrop-blur-md shrink-0 shadow-xl">
           <div className="flex items-center gap-3 ml-1">
             <div className="p-2 bg-indigo-600 rounded-xl shadow-lg shadow-indigo-600/30">
               <Sparkles size={18} className="text-white" />
             </div>
-            <h1 className="text-sm md:text-lg font-black uppercase tracking-tight leading-none">
-              Ambil Antrean
-            </h1>
+            <h1 className="text-sm md:text-lg font-black uppercase tracking-tight leading-none">Ambil Antrean</h1>
           </div>
-          <Link href="/">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-10 rounded-2xl gap-2 bg-slate-800/50 border-slate-700 text-indigo-400 font-black text-[9px] md:text-xs uppercase border-b-4 border-b-indigo-900/50"
-            >
-              <Home size={14} /> Dashboard
-            </Button>
-          </Link>
+          <Link href="/"><Button variant="outline" size="sm" className="h-10 rounded-2xl gap-2 bg-slate-800/50 border-slate-700 text-indigo-400 font-black text-[9px] md:text-xs uppercase border-b-4 border-b-indigo-900/50"><Home size={14} /> Dashboard</Button></Link>
         </header>
 
         <div className="space-y-6 pb-10">
           <div className="text-center space-y-2">
-            <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tighter">
-              Reservasi Jadwal
-            </h2>
-            <p className="text-slate-400 text-[11px] md:text-sm font-medium italic">
-              Pilih waktu kedatangan yang tersedia.
-            </p>
+            <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tighter">Reservasi Jadwal</h2>
+            <p className="text-slate-400 text-[11px] md:text-sm font-medium italic">Pilih waktu kedatangan yang tersedia.</p>
           </div>
 
           <Card className="bg-slate-900/40 border-slate-800 backdrop-blur-xl shadow-2xl rounded-[2.5rem] overflow-hidden border-2">
             <CardContent className="p-6 md:p-10">
               <form onSubmit={handleSubmit} className="space-y-5">
-                {/* INPUT NAMA & PHONE */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2">
-                      <User size={12} /> Nama
-                    </Label>
-                    <Input
-                      placeholder="Nama Lengkap"
-                      className="h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      required
-                    />
+                    <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><User size={12} /> Nama</Label>
+                    <Input placeholder="Nama Lengkap" className="h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2">
-                      <Phone size={12} /> WhatsApp
-                    </Label>
-                    <Input
-                      type="tel"
-                      placeholder="0812..."
-                      className="h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      required
-                    />
+                    <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Phone size={12} /> WhatsApp</Label>
+                    <Input type="tel" placeholder="0812..." className="h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} required />
                   </div>
                 </div>
 
-                {/* PILIH TANGGAL */}
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2">
-                    <Calendar size={12} /> Tanggal Kedatangan
-                  </Label>
-                  <Input
-                    type="date"
-                    min={new Date().toISOString().split("T")[0]}
-                    className="h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm"
-                    value={formData.date}
-                    onChange={(e) =>
-                      setFormData({ ...formData, date: e.target.value, time: "" })
-                    }
-                    required
-                  />
+                  <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Calendar size={12} /> Tanggal Kedatangan</Label>
+                  <Input type="date" min={getWitaDateString(getWitaNow())} className="h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value, time: "" })} required />
                 </div>
 
-                {/* PILIH LAYANAN */}
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2">
-                    <Briefcase size={12} /> Layanan
-                  </Label>
-                  <Select
-                    onValueChange={(val) => setFormData({ ...formData, serviceId: val })}
-                  >
-                    <SelectTrigger className="w-full !h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm">
-                      <SelectValue placeholder="Pilih Layanan" />
-                    </SelectTrigger>
+                  <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Briefcase size={12} /> Layanan</Label>
+                  <Select onValueChange={(val) => setFormData({ ...formData, serviceId: val })}>
+                    <SelectTrigger className="w-full !h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm"><SelectValue placeholder="Pilih Layanan" /></SelectTrigger>
                     <SelectContent className="bg-slate-900 border-slate-800 text-white rounded-2xl">
-                      {services.map((s) => (
-                        <SelectItem key={s.id} value={s.id} className="py-3 font-bold text-xs">
-                          {s.name}
-                        </SelectItem>
-                      ))}
+                      {services.map((s) => (<SelectItem key={s.id} value={s.id} className="py-3 font-bold text-xs">{s.name}</SelectItem>))}
                     </SelectContent>
                   </Select>
                 </div>
 
-                {/* PILIH JAM (SLOT) */}
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2">
-                    <Clock size={12} /> Jam Tersedia
-                  </Label>
+                  <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Clock size={12} /> Jam Tersedia</Label>
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                     {TIME_SLOTS.map((slot) => {
-                      // CEK LOGIKA DISABLED
                       const isBooked = bookedSlots.includes(slot);
-                      const todayStr = new Date().toISOString().split("T")[0];
-                      const isToday = formData.date === todayStr;
+                      const isToday = formData.date === getWitaDateString(now);
                       const isPast = isToday && (() => {
-                        const [slotH, slotM] = slot.split(":").map(Number);
-                        const slotMinutes = slotH * 60 + slotM;
-                        const nowMinutes = now.getHours() * 60 + now.getMinutes();
-                        return slotMinutes <= nowMinutes;
+                        const [sH, sM] = slot.split(":").map(Number);
+                        return (sH * 60 + sM) <= (now.getHours() * 60 + now.getMinutes());
                       })();
                       const isDisabled = isBooked || isPast;
-
                       const isSelected = formData.time === slot;
 
                       return (
-                        <button
-                          key={slot}
-                          type="button"
-                          disabled={isDisabled}
-                          onClick={() => setFormData({ ...formData, time: slot })}
-                          className={`
-                            py-3 rounded-xl text-[10px] font-black transition-all border-b-4
-                            ${
-                              isDisabled
-                                ? "bg-slate-800/20 border-slate-900 text-slate-600 cursor-not-allowed opacity-50"
-                                : isSelected
-                                ? "bg-indigo-600 border-indigo-800 text-white scale-95"
-                                : "bg-slate-800 border-slate-950 text-slate-300 hover:bg-slate-700"
-                            }
-                          `}
+                        <button key={slot} type="button" disabled={isDisabled} onClick={() => setFormData({ ...formData, time: slot })}
+                          className={`py-3 rounded-xl text-[10px] font-black transition-all border-b-4 ${
+                            isDisabled ? "bg-slate-800/20 border-slate-900 text-slate-600 cursor-not-allowed opacity-50" :
+                            isSelected ? "bg-indigo-600 border-indigo-800 text-white scale-95" :
+                            "bg-slate-800 border-slate-950 text-slate-300 hover:bg-slate-700"
+                          }`}
                         >
                           {slot}
-                          <span className="block text-[7px] opacity-60">
-                            {isBooked ? "FULL" : isPast ? "LEWAT" : "READY"}
-                          </span>
+                          <span className="block text-[7px] opacity-60">{isBooked ? "FULL" : isPast ? "LEWAT" : "READY"}</span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
 
-                <Button
-                  disabled={loading || !formData.time}
-                  className="w-full h-14 bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest rounded-2xl shadow-xl mt-4 border-b-4 border-b-indigo-800"
-                >
+                <Button disabled={loading || !formData.time} className="w-full h-14 bg-indigo-600 hover:bg-indigo-500 text-white font-black uppercase tracking-widest rounded-2xl shadow-xl mt-4 border-b-4 border-b-indigo-800">
                   {loading ? <Loader2 className="animate-spin" /> : "KONFIRMASI JADWAL"}
                 </Button>
               </form>
