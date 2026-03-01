@@ -194,10 +194,10 @@ export default function PersonalMonitorPage() {
     setUserBookingDetails(cookieBookings);
     fetchAllUserBookings(ids);
 
+    // LOGIKA: OTOMATIS OFF SAAT REFRESH/BUKA BARU
     if (isNotificationSupported()) {
-      const perm = getNotificationPermission();
-      notificationsEnabledRef.current = perm === "granted";
-      setNotificationsEnabled(perm === "granted");
+      setNotificationsEnabled(false);
+      notificationsEnabledRef.current = false;
     }
 
     fetchData();
@@ -272,6 +272,10 @@ export default function PersonalMonitorPage() {
 
   const handleToggleNotifications = async () => {
     if (!isNotificationSupported()) return toast.error("Browser tidak mendukung notifikasi");
+    
+    // Unlock TTS setiap kali klik tombol
+    unlockTTS();
+
     if (notificationsEnabled) {
       notificationsEnabledRef.current = false;
       setNotificationsEnabled(false);
@@ -281,7 +285,7 @@ export default function PersonalMonitorPage() {
       if (permission === "granted") {
         notificationsEnabledRef.current = true;
         setNotificationsEnabled(true);
-        toast.success("✅ Notifikasi AKTIF!");
+        toast.success("✅ Notifikasi & Suara AKTIF!");
       }
     }
   };
@@ -329,7 +333,7 @@ export default function PersonalMonitorPage() {
           </div>
           <div className="flex items-center gap-2 md:gap-3">
             <Link href="/">
-              <Button variant="outline" size="sm" className="h-10 rounded-2xl gap-2 bg-slate-800/50 border-slate-700 text-indigo-400 font-black text-[10px] md:text-xs uppercase border-b-4 border-b-indigo-900/50"><Home size={14} /> Dashboard</Button>
+              <Button variant="outline" size="sm" className="h-10 md:h-12 rounded-2xl gap-2 bg-slate-800/50 border-slate-700 text-indigo-400 font-black text-[10px] md:text-xs uppercase border-b-4 border-b-indigo-900/50"><Home size={14} /> Dashboard</Button>
             </Link>
             <Button
               onClick={handleToggleNotifications}

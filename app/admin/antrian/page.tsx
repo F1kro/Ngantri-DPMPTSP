@@ -17,6 +17,7 @@ import {
   XCircle,
   UserCheck,
   AlertTriangle,
+  Loader2, // Tambah loader icon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -82,6 +83,7 @@ export default function ManajemenAntrean() {
   const [services, setServices] = useState<any[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
   const [mounted, setMounted] = useState(false);
+  const [isCalling, setIsCalling] = useState(false); // STATE BARU UNTUK CEGAH DOUBLE CLICK
   
   const [filterDate, setFilterDate] = useState(""); 
   
@@ -219,12 +221,16 @@ export default function ManajemenAntrean() {
         const next = waitingOnly[0];
         if (!next) return toast.info("Tidak ada antrean menunggu");
         if (activeQueue) return toast.error("Selesaikan antrean aktif dulu!");
+        
+        setIsCalling(true); // Mulai loading
         const { error } = await supabase.from("bookings").update({ status: "in_progress", updated_at: new Date().toISOString() }).eq("id", next.id);
         if (!error) {
           createLog('CALL', `Memanggil antrean ${next.booking_number}`);
-          panggilSuara(next.booking_number);
+          await panggilSuara(next.booking_number); // Tunggu proses suara
           await fetchData();
         }
+        setIsCalling(false); // Selesai loading
+
       } else if (type === "SELESAI" && activeQueue) {
         const { error } = await supabase.from("bookings").update({ status: "completed" }).eq("id", activeQueue.id);
         if (!error) {
@@ -232,8 +238,19 @@ export default function ManajemenAntrean() {
           await fetchData();
         }
       } else if (type === "ULANG" && activeQueue) {
-        createLog('CALL', `Panggil ulang antrean ${activeQueue.booking_number}`);
-        panggilSuara(activeQueue.booking_number);
+        setIsCalling(true); // Mulai loading
+        const { error } = await supabase
+          .from("bookings")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", activeQueue.id);
+          
+        if (!error) {
+          createLog('CALL', `Panggil ulang antrean ${activeQueue.booking_number}`);
+          await panggilSuara(activeQueue.booking_number); // Tunggu proses suara
+          toast.info(`Panggil ulang ${activeQueue.booking_number} terkirim`);
+        }
+        setIsCalling(false); // Selesai loading
+
       } else if (type === "SWAP" && targetId && activeQueue) {
         const target = bookings.find((b) => b.id === targetId);
         if (!target) return;
@@ -250,7 +267,7 @@ export default function ManajemenAntrean() {
         ]);
         if (!res1.error && !res2.error) {
           createLog('SYSTEM', `Skip antrean ${activeQueue.booking_number} ke ${target.booking_number}`);
-          panggilSuara(target.booking_number);
+          await panggilSuara(target.booking_number);
           await new Promise((resolve) => setTimeout(resolve, 2000));
           isSwappingRef.current = false;
           await fetchData();
@@ -260,6 +277,7 @@ export default function ManajemenAntrean() {
       createLog('ERROR', `Gagal aksi ${type}: ${error.message}`, 'error');
       toast.error(`Gagal: ${error?.message}`);
       isSwappingRef.current = false;
+      setIsCalling(false);
       await fetchData();
     }
   };
@@ -367,7 +385,14 @@ export default function ManajemenAntrean() {
               </div>
             ) : activeQueue ? (
               <>
-                <Button onClick={() => handleAction("ULANG")} className="h-14 px-6 bg-slate-800 hover:bg-slate-700 text-white rounded-xl border-b-4 border-slate-950 font-black uppercase text-xs gap-2 active:translate-y-[2px] active:border-b-0 transition-all"><RotateCcw size={18} /> Panggil Ulang</Button>
+                <Button 
+                  disabled={isCalling} 
+                  onClick={() => handleAction("ULANG")} 
+                  className="h-14 px-6 bg-slate-800 hover:bg-slate-700 text-white rounded-xl border-b-4 border-slate-950 font-black uppercase text-xs gap-2 active:translate-y-[2px] active:border-b-0 transition-all"
+                >
+                  {isCalling ? <Loader2 className="animate-spin" size={18} /> : <RotateCcw size={18} />} 
+                  Panggil Ulang
+                </Button>
                 <Dialog open={isSkipModalOpen} onOpenChange={setIsSkipModalOpen}>
                   <DialogTrigger asChild><Button className="h-14 px-6 bg-amber-600 hover:bg-amber-500 text-white rounded-xl border-b-4 border-amber-800 font-black uppercase text-xs gap-2 active:translate-y-[2px] active:border-b-0 transition-all"><SkipForward size={18} /> Skip Antrean</Button></DialogTrigger>
                   <DialogContent className="bg-slate-900 border-slate-800 text-white rounded-[2rem] max-w-md p-6">
@@ -388,10 +413,11 @@ export default function ManajemenAntrean() {
               </>
             ) : (
               <Button 
+                disabled={isCalling}
                 onClick={() => handleAction("NEXT")} 
                 className="h-16 px-12 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl border-b-4 border-indigo-800 font-black uppercase text-xl gap-3 active:translate-y-[2px] active:border-b-0 transition-all shadow-xl"
               >
-                <Volume2 size={24} /> 
+                {isCalling ? <Loader2 className="animate-spin" size={24} /> : <Volume2 size={24} />} 
                 <span>{activeQueue ? "Panggil Berikutnya" : "Panggil Antrean"}</span>
               </Button>
             )}
@@ -475,7 +501,7 @@ export default function ManajemenAntrean() {
           {/* TABLE 2: RIWAYAT LAYANAN */}
           <div className="bg-slate-900/40 border border-slate-800 rounded-[2rem] flex flex-col shadow-xl overflow-hidden">
             <div className="h-14 border-b border-slate-800 bg-slate-950 flex items-center px-6 shrink-0">
-              <h3 className="font-black uppercase text-sm text-indigo-400 tracking-wider">Riwayat Layanan</h3>
+              <h3 className="font-black uppercase text-sm text-slate-500 tracking-wider">Riwayat Layanan</h3>
             </div>
 
             <div className="flex-1 overflow-auto custom-scrollbar">
@@ -500,7 +526,6 @@ export default function ManajemenAntrean() {
                         <p className="text-sm text-slate-400 font-bold uppercase truncate">{b.visitor_name}</p>
                         {b.status === "cancelled" ? (
                           <p className="text-[9px] text-red-500 font-black italic uppercase truncate leading-none mt-1">
-                            {/* Cek notes dulu, kalau kosong pakai cancel_reason */}
                             Ket: {b.notes || b.cancel_reason || "Tanpa alasan"}
                           </p>
                         ) : (
@@ -517,7 +542,7 @@ export default function ManajemenAntrean() {
                               ? "text-red-500 bg-red-500/10" 
                               : b.status === "in_progress"
                               ? "text-indigo-400 bg-indigo-500/10"
-                              : "text-amber-500 bg-amber-500/10" // Status 'waiting'
+                              : "text-amber-500 bg-amber-500/10" 
                           }`}
                         >
                           {b.status === "in_progress" ? "DILAYANI" : b.status.toUpperCase()}

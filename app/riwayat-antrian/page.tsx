@@ -163,7 +163,7 @@ export default function MyQueueHistoryPage() {
         </div>
         <div className="flex items-center gap-2">
           <Link href="/antrean">
-            <Button variant="outline" size="sm" className="h-9 px-3 rounded-xl bg-indigo-600/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-600/20 gap-2 text-[10px] font-black uppercase border-b-4 border-indigo-900 active:translate-y-[2px] active:border-b-0 transition-all">
+            <Button variant="outline" size="sm" className="h-9 px-3 rounded-xl bg-indigo-600/10 border border-indigo-500/30 text-indigo-400  gap-2 text-[10px] font-black uppercase border-b-4 border-indigo-900 active:translate-y-[2px] active:border-b-0 transition-all">
               <Monitor size={14} /> Antrean
             </Button>
           </Link>
