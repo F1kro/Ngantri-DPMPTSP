@@ -1,165 +1,85 @@
-# Sistem Antrian Dinas Penanaman Modal dan Perizinan
+# Sistem Antrean Digital DPMPTSP Kabupaten Lombok Barat
 
-Aplikasi web untuk booking antrian online dengan sistem hybrid online-offline. Dibangun untuk memudahkan masyarakat dalam mengakses layanan dinas penanaman modal dan perizinan satu pintu.
+Aplikasi manajemen antrean terintegrasi yang dirancang khusus untuk meningkatkan efisiensi pelayanan publik pada Dinas Penanaman Modal dan Pelayanan Terpadu Satu Pintu (DPMPTSP) Kabupaten Lombok Barat. Sistem ini mendukung model hybrid untuk sinkronisasi antrean online dan operasional offline secara real-time.
 
-## 🚀 Fitur Utama
+## 🌟 Fitur Utama
 
-### Untuk User (Publik)
-- **Booking Antrian Online** - Form sederhana dengan input nama, telepon, dan pilihan layanan
-- **Generate QR Code** - Setiap booking mendapatkan QR code yang bisa dicetak/disimpan
-- **Real-time Queue Status** - Lihat posisi antrian, status, dan estimasi waktu
-- **Dashboard Tracking** - Pantau antrian Anda kapan saja dengan search dan filter
-- **Mobile Friendly** - Interface yang responsif dan mudah digunakan di semua device
+### Sisi Masyarakat (Public Interface)
+- **Reservasi Antrean Online**: Pengambilan nomor antrean berdasarkan kategori layanan dan slot waktu yang tersedia.
+- **E-Ticket & QR Code**: Tiket digital otomatis tersimpan di perangkat user untuk proses verifikasi di loket.
+- **Monitoring Live**: Pantau posisi antrean yang sedang dilayani secara real-time dari mana saja untuk menghindari penumpukan di lokasi.
+- **Riwayat Mandiri**: Fitur bagi user untuk melihat riwayat kunjungan dan pembatalan antrean secara personal.
+- **Sistem Notifikasi**: Peringatan visual dan suara (TTS) saat nomor antrean mulai dipanggil.
 
-### Untuk Admin
-- **Manajemen Antrian Real-time** - Update status antrian secara langsung
-- **CRUD Layanan** - Tambah, ubah, hapus layanan (support 21+ layanan)
-- **Dashboard Statistik** - Lihat total antrian, sedang dilayani, dan sudah selesai
-- **Integrasi Hybrid** - Kelola antrian online dan offline dalam satu sistem
-
-## 📋 Persyaratan
-
-- Node.js 18+
-- Akun Supabase (gratis)
-- Browser modern (Chrome, Firefox, Safari, Edge)
-
-## ⚡ Quick Start
-
-1. **Clone atau Download Project**
-   ```bash
-   git clone <repository-url>
-   cd <project-folder>
-   ```
-
-2. **Setup Supabase**
-   - Buat akun di https://supabase.com
-   - Buat project baru
-   - Salin `Project URL` dan `Anon Key`
-
-3. **Setup Environment Variables**
-   ```bash
-   # Buat file .env.local
-   NEXT_PUBLIC_SUPABASE_URL=your_project_url
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-   ```
-
-4. **Setup Database**
-   - Buka SQL Editor di Supabase Dashboard
-   - Copy-paste isi `/scripts/init-database.sql`
-   - Jalankan SQL
-
-5. **Install & Run**
-   ```bash
-   npm install
-   npm run dev
-   ```
-
-Buka http://localhost:3000
-
-## 📱 Pages & Routes
-
-| Route | Deskripsi | Akses |
-|-------|-----------|-------|
-| `/` | Halaman utama | Public |
-| `/booking` | Form booking antrian | Public |
-| `/booking-confirmation/[id]` | Konfirmasi + QR Code | Public |
-| `/dashboard` | Cek status antrian | Public |
-| `/admin/login` | Login admin | Public |
-| `/admin/dashboard` | Dashboard admin | Protected |
-
-## 🔐 Admin Login (Demo)
-
-```
-Email: admin@dinas.go.id
-Password: admin123
-```
-
-⚠️ **Ganti credentials untuk production!** Edit di `/app/api/admin/login/route.ts`
-
-## 🎨 Design Highlights
-
-- **Warna:** Blue/Indigo untuk user (modern), Dark Gray untuk admin (profesional)
-- **Typography:** Clean dan readable untuk semua usia (boomer-friendly)
-- **UX:** Simple form, clear status indicators, large buttons
-- **Responsive:** Mobile, tablet, desktop optimized
+### Sisi Administrator (Admin Panel)
+- **Console Operasional**: Manajemen panggilan antrean (Panggil, Panggil Ulang, Selesai, dan Skip).
+- **Log Sistem & Audit Trail**: Pencatatan otomatis setiap aksi admin dan aktivitas sistem untuk keamanan data.
+- **Rekapitulasi Data**: Fitur filter data berdasarkan periode, layanan, hingga slot waktu dengan kemampuan ekspor ke Excel.
+- **Manajemen Layanan**: Konfigurasi dinamis untuk jenis layanan, kode prefix (A, B, C, dst), dan deskripsi.
+- **Auto-Cancel System**: Logika otomatis untuk membatalkan antrean yang kadaluarsa atau tidak hadir.
 
 ## 🛠 Tech Stack
 
-- **Frontend:** Next.js 16, React 19, Tailwind CSS v4
-- **Backend:** Supabase (PostgreSQL)
-- **Authentication:** Supabase Auth + Demo Admin
-- **Real-time:** Supabase Realtime subscriptions
-- **QR Code:** qrcode library
-- **UI Components:** shadcn/ui (Radix UI + Tailwind)
+- **Framework**: [Next.js](https://nextjs.org/) (App Router)
+- **Language**: TypeScript
+- **Database & Real-time**: [Supabase](https://supabase.com/) (PostgreSQL)
+- **Styling**: Tailwind CSS & Shadcn/UI
+- **Icons**: Lucide React
+- **Logging**: Custom Internal Logger System
+- **Export**: XLSX Library
 
-## 📊 Database Schema
+## 📋 Persyaratan Sistem
 
-### Layanan (21 default)
-```
-- Pendaftaran Perusahaan Baru
-- Perubahan Data Perusahaan
-- Permohonan Izin Usaha
-- ... (18 more)
-```
+- Node.js 18.x atau versi terbaru
+- Akun Supabase (untuk Database & Real-time SDK)
+- Koneksi Internet (untuk sinkronisasi real-time)
 
-### Tables
-- `services` - Master data layanan
-- `bookings` - Data antrian (online + offline)
-- `queue_history` - Riwayat antrian
+## ⚡ Instalasi Cepat
 
-Lihat `/SETUP_GUIDE.md` untuk detail schema lengkap.
-
-## 🔄 Alur Hybrid Online-Offline
-
-```
-User Web                    Admin Office              Database (Supabase)
-   |                            |                           |
-   +-- Book Antrian ---------> Supabase ---------> Store in DB
-   |                            |                           |
-   +-- Get QR Code           Real-time Update    Real-time Sync
-   |                            |                           |
-   +-- Check Status <------- Admin Updates ---------> Query DB
-   |                            |                           |
-   +-- See Position & Time      |                           |
-                                |                           |
-                        Update Status in Admin Panel         |
-                                +--------> Update booking status
-```
-
-## 📦 Deployment
-
-### Deploy ke Vercel (Recommended)
-
-1. Push ke GitHub
-2. Import project di Vercel
-3. Set environment variables
-4. Deploy!
-
+### 1. Clone Repositori
 ```bash
-npm run build
+git clone <repository-url>
+cd sistem-antrean-dpmptsp
 ```
 
-## 🐛 Troubleshooting
+### 2. Konfigurasi Environment
+Buat file `.env.local` di root folder:
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+```
 
-**Q: Form booking tidak submit?**
-A: Pastikan environment variables sudah benar dan Supabase project aktif
+### 3. Inisialisasi Database
+Jalankan skrip SQL inisialisasi tabel `services`, `bookings`, dan `system_logs` pada SQL Editor di Dashboard Supabase.
 
-**Q: Admin dashboard kosong?**
-A: Cek apakah sudah login dengan credentials yang benar
+### 4. Instalasi Dependensi & Jalankan
+```bash
+npm install
+npm run dev
+```
 
-**Q: QR Code tidak muncul?**
-A: Clear browser cache dan refresh halaman
+## 🔒 Keamanan & Performa
 
-Lihat `/SETUP_GUIDE.md` untuk troubleshooting lengkap.
+- **Row Level Security (RLS)**: Menjamin data antrean hanya dapat diubah oleh pihak yang berwenang melalui kebijakan database.
+- **Error Handling**: Implementasi Global Error Boundary dan Fallback UI untuk menjaga stabilitas sistem saat terjadi gangguan.
+- **Rate Limiting**: Proteksi sisi klien dan server terhadap spamming pengambilan nomor antrean.
+- **Optimized Indexing**: Struktur database telah dioptimasi untuk menangani query data log dan riwayat dalam jumlah besar secara cepat.
 
-## 📞 Support
+## 📱 Struktur Halaman
 
-Dokumentasi lengkap: `/SETUP_GUIDE.md`
+| Jalur (Route)        | Deskripsi                        | Otoritas |
+|----------------------|----------------------------------|----------|
+| `/`                  | Beranda Utama                    | Publik   |
+| `/booking`           | Form Reservasi Antrean           | Publik   |
+| `/monitor-antrean`   | Live Monitoring Antrean          | Publik   |
+| `/riwayat-antrean`   | Riwayat Personal User            | Publik   |
+| `/admin/login`       | Portal Autentikasi Admin         | Publik   |
+| `/admin/antrean`     | Dashboard Operasional Loket      | Admin    |
+| `/admin/rekap`       | Laporan & Ekspor Data            | Admin    |
+| `/admin/logs`        | Audit Trail Sistem               | Admin    |
 
-## 📝 License
+## 📝 Lisensi & Pengembangan
 
-Dibangun untuk PKL Dinas Penanaman Modal dan Perizinan 2024
+Proyek ini dikembangkan dalam rangka Praktek Kerja Lapangan (PKL) pada Dinas Penanaman Modal dan Pelayanan Terpadu Satu Pintu (DPMPTSP) Kabupaten Lombok Barat.
 
----
-
-**Dibuat dengan ❤️ menggunakan v0.app**
+Dikembangkan oleh **Fiqro Najiah (Masfiq)** — 2026

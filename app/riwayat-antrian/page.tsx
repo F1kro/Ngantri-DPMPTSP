@@ -123,7 +123,7 @@ export default function MyQueueHistoryPage() {
         .update({ 
           status: "cancelled", 
           cancelled_at: new Date().toISOString(), 
-          cancel_reason: cancelReason.trim() 
+          cancel_reason: cancelReason.trim().substring(0, 50) // Keamanan tambahan di sisi logic
         })
         .eq("id", selectedBooking.id);
       
@@ -157,20 +157,18 @@ export default function MyQueueHistoryPage() {
             <History size={16} className="text-white" />
           </div>
           <div>
-            <h1 className="text-sm font-black uppercase tracking-tight leading-none text-white italic">Riwayat Antrean</h1>
+            <h1 className="text-sm font-black uppercase tracking-tight leading-none text-white ">Riwayat Antrean</h1>
             <p className="text-[8px] font-bold text-slate-500 uppercase mt-0.5 tracking-widest">DPMPTSP LOBAR</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/dashboard">
+          <Link href="/antrean">
             <Button variant="outline" size="sm" className="h-9 px-3 rounded-xl bg-indigo-600/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-600/20 gap-2 text-[10px] font-black uppercase border-b-4 border-indigo-900 active:translate-y-[2px] active:border-b-0 transition-all">
-              <Monitor size={14} /> Antrian
+              <Monitor size={14} /> Antrean
             </Button>
           </Link>
           <Link href="/">
-            <Button variant="outline" size="sm" className="h-9 px-3 rounded-xl bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800 gap-2 text-[10px] font-black uppercase border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0 transition-all">
-              <Home size={14} /> Home
-            </Button>
+            <Button variant="outline" size="sm" className="h-10 rounded-2xl gap-2 bg-slate-800/50 border-slate-700 text-indigo-400 font-black text-[10px] md:text-xs uppercase border-b-4 border-b-indigo-900/50"><Home size={14} /> Dashboard</Button>
           </Link>
         </div>
       </header>
@@ -323,16 +321,21 @@ export default function MyQueueHistoryPage() {
               Antrean <b className="text-indigo-400">{selectedBooking?.booking_number}</b> akan dibatalkan secara permanen.
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
+          <div className="py-4 space-y-2">
+            <div className="flex justify-between items-center px-1">
+               <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Alasan Pembatalan</label>
+               <span className={`text-[9px] font-bold ${cancelReason.length >= 50 ? 'text-red-500' : 'text-slate-600'}`}>{cancelReason.length}/50</span>
+            </div>
             <Textarea
-              placeholder="Berikan alasan pembatalan..."
+              placeholder="Contoh: Ada keperluan mendadak..."
+              maxLength={50}
               className="bg-slate-900 border-slate-800 rounded-2xl resize-none text-xs h-24 text-white p-4 focus:border-indigo-500/50 transition-all"
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
             />
           </div>
           <DialogFooter className="flex flex-col gap-2">
-            <Button disabled={cancelling || !cancelReason}
+            <Button disabled={cancelling || !cancelReason.trim()}
               className="h-12 bg-red-600 hover:bg-red-500 rounded-2xl font-black text-xs text-white border-b-4 border-red-800 shadow-lg transition-all active:translate-y-[2px] active:border-b-0"
               onClick={handleCancel}>
               {cancelling ? <Loader2 className="animate-spin" size={15} /> : "YA, KONFIRMASI BATAL"}

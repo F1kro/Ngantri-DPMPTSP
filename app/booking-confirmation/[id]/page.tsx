@@ -198,7 +198,7 @@ export default function BookingConfirmationPage() {
           </Link>
         </div>
         <div className="print:hidden">
-          <Link href="/dashboard" className="w-full block">
+          <Link href="/antrean" className="w-full block">
             <Button className="w-full h-14 bg-blue-400 hover:bg-blue-300 text-white font-black rounded-xl gap-3 uppercase text-[10px] shadow-xl">
               <Monitor size={18}/> Cek Live Antrian
             </Button>

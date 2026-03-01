@@ -329,10 +329,7 @@ export default function PersonalMonitorPage() {
           </div>
           <div className="flex items-center gap-2 md:gap-3">
             <Link href="/">
-              <Button variant="outline" className="h-10 md:h-12 px-4 md:px-6 rounded-xl bg-slate-800 border-slate-700 text-slate-300 font-bold text-[10px] md:text-xs uppercase gap-2 border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0 transition-all">
-                <Home size={16} />
-                <span>Home</span>
-              </Button>
+              <Button variant="outline" size="sm" className="h-10 rounded-2xl gap-2 bg-slate-800/50 border-slate-700 text-indigo-400 font-black text-[10px] md:text-xs uppercase border-b-4 border-b-indigo-900/50"><Home size={14} /> Dashboard</Button>
             </Link>
             <Button
               onClick={handleToggleNotifications}

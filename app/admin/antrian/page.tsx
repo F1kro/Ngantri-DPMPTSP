@@ -387,7 +387,13 @@ export default function ManajemenAntrean() {
                 <Button onClick={() => handleAction("SELESAI")} className="h-14 px-8 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl border-b-4 border-emerald-800 font-black uppercase text-xs gap-2 active:translate-y-[2px] active:border-b-0 transition-all"><CheckCircle2 size={18} /> Selesai</Button>
               </>
             ) : (
-              <Button onClick={() => handleAction("NEXT")} className="h-16 px-12 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl border-b-4 border-indigo-800 font-black uppercase text-xl gap-3 active:translate-y-[2px] active:border-b-0 transition-all shadow-xl"><Volume2 size={24} /> Panggil Berikutnya</Button>
+              <Button 
+                onClick={() => handleAction("NEXT")} 
+                className="h-16 px-12 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl border-b-4 border-indigo-800 font-black uppercase text-xl gap-3 active:translate-y-[2px] active:border-b-0 transition-all shadow-xl"
+              >
+                <Volume2 size={24} /> 
+                <span>{activeQueue ? "Panggil Berikutnya" : "Panggil Antrean"}</span>
+              </Button>
             )}
           </div>
         </section>
@@ -469,7 +475,7 @@ export default function ManajemenAntrean() {
           {/* TABLE 2: RIWAYAT LAYANAN */}
           <div className="bg-slate-900/40 border border-slate-800 rounded-[2rem] flex flex-col shadow-xl overflow-hidden">
             <div className="h-14 border-b border-slate-800 bg-slate-950 flex items-center px-6 shrink-0">
-              <h3 className="font-black uppercase text-sm text-slate-500 tracking-wider">Riwayat Layanan</h3>
+              <h3 className="font-black uppercase text-sm text-indigo-400 tracking-wider">Riwayat Layanan</h3>
             </div>
 
             <div className="flex-1 overflow-auto custom-scrollbar">
@@ -494,15 +500,27 @@ export default function ManajemenAntrean() {
                         <p className="text-sm text-slate-400 font-bold uppercase truncate">{b.visitor_name}</p>
                         {b.status === "cancelled" ? (
                           <p className="text-[9px] text-red-500 font-black italic uppercase truncate leading-none mt-1">
-                            Ket: {b.notes}
+                            {/* Cek notes dulu, kalau kosong pakai cancel_reason */}
+                            Ket: {b.notes || b.cancel_reason || "Tanpa alasan"}
                           </p>
                         ) : (
                            <div className="h-4" /> 
                         )}
                       </td>
                       <td className="px-5 text-center">
-                        <Badge variant="outline" className={`text-[10px] font-black border-none px-3 py-1.5 ${b.status === "completed" ? "text-emerald-500 bg-emerald-500/10" : b.status === "cancelled" ? "text-red-500 bg-red-500/10" : "text-slate-600 bg-slate-800/50"}`}>
-                          {b.status.toUpperCase()}
+                        <Badge 
+                          variant="outline" 
+                          className={`text-[10px] font-black border-none px-3 py-1.5 ${
+                            b.status === "completed" 
+                              ? "text-emerald-500 bg-emerald-500/10" 
+                              : b.status === "cancelled" 
+                              ? "text-red-500 bg-red-500/10" 
+                              : b.status === "in_progress"
+                              ? "text-indigo-400 bg-indigo-500/10"
+                              : "text-amber-500 bg-amber-500/10" // Status 'waiting'
+                          }`}
+                        >
+                          {b.status === "in_progress" ? "DILAYANI" : b.status.toUpperCase()}
                         </Badge>
                       </td>
                     </tr>

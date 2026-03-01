@@ -49,7 +49,7 @@ export default function Home() {
             color="indigo"
           />
           <MenuCard
-            href="/dashboard"
+            href="/antrean"
             title="Cek Antrean"
             desc="Pantau nomor antrean yang sedang dilayani secara real-time dari HP Anda."
             icon={<MonitorPlay size={48} />}
