@@ -205,7 +205,6 @@ export default function ManajemenLayanan() {
 
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 custom-scrollbar">
-          
           <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 font-bold">
             <div>
               <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Manajemen Layanan</h2>
@@ -218,7 +217,7 @@ export default function ManajemenLayanan() {
                   <Plus size={16} /> TAMBAH LAYANAN
                 </Button>
               </DialogTrigger>
-              <DialogContent className="bg-slate-900 border-slate-800 text-white rounded-[2.5rem] shadow-2xl p-10 max-w-lg border-2">
+              <DialogContent className="bg-slate-900 border-slate-800 text-white rounded-[2.5rem] shadow-2xl p-10 max-w-lg border-2 [&>button]:hidden">
                 <DialogHeader className="space-y-2">
                   <div className="p-3 bg-indigo-600 w-fit rounded-2xl mb-2 shadow-lg shadow-indigo-600/20"><Plus size={24} /></div>
                   <DialogTitle className="text-3xl font-black uppercase tracking-tight">Layanan Baru</DialogTitle>
@@ -334,7 +333,7 @@ export default function ManajemenLayanan() {
             <div className="bg-slate-950/50 p-4 border-t border-slate-800 flex justify-between items-center shrink-0">
               <p className="text-[10px] font-black text-slate-500 uppercase">Halaman {currentPage} dari {totalPages || 1}</p>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)} className="h-9 w-9 p-0 bg-slate-900 border-slate-800 hover:bg-indigo-600 text-white border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0"><ChevronLeft size={16} /></Button>
+                <Button type="button" onClick={() => setOpenAdd(false)} className="flex-1 h-16 bg-slate-800 text-slate-400 font-black rounded-2xl hover:bg-slate-700 uppercase tracking-widest text-[10px] border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0 transition-all">Batal</Button>
                 <Button variant="outline" size="sm" disabled={currentPage >= totalPages || totalPages === 0} onClick={() => setCurrentPage((p) => p + 1)} className="h-9 w-9 p-0 bg-slate-900 border-slate-800 hover:bg-indigo-600 text-white border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0"><ChevronRight size={16} /></Button>
               </div>
             </div>
@@ -344,7 +343,7 @@ export default function ManajemenLayanan() {
 
       {/* EDIT MODAL */}
       <Dialog open={openEdit} onOpenChange={setOpenEdit}>
-        <DialogContent className="bg-[#0f172a] border-slate-800 text-white rounded-[2.5rem] p-10 shadow-2xl border-2">
+        <DialogContent className="bg-[#0f172a] border-slate-800 text-white rounded-[2.5rem] p-10 shadow-2xl border-2 [&>button]:hidden">
           <DialogHeader className="space-y-2">
             <div className="p-3 bg-amber-500/20 w-fit rounded-2xl mb-2 border border-amber-500/30 shadow-lg shadow-amber-500/10"><Settings2 size={24} className="text-amber-500" /></div>
             <DialogTitle className="text-3xl font-black uppercase tracking-tight text-white">Ubah Layanan</DialogTitle>

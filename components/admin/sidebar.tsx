@@ -99,9 +99,14 @@ export default function AdminSidebar() {
             variant="ghost" 
             onClick={() => setShowLogoutDialog(true)} 
             disabled={isLoggingOut}
-            className="w-full justify-start text-slate-400 hover:text-red-400 hover:bg-red-400/10 gap-3 font-bold uppercase text-[10px] tracking-widest h-12 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full justify-start bg-red-600 hover:bg-red-500 text-white font-black uppercase text-[10px] tracking-widest h-12 px-5 rounded-xl shadow-lg shadow-red-900/20 gap-3 transition-all active:translate-y-[2px] active:border-b-0 border-b-4 border-red-900 disabled:opacity-50 disabled:cursor-not-allowed group"
           >
-            <LogOut size={20} /> {isLoggingOut ? 'Memproses...' : 'Keluar Sistem'}
+            {isLoggingOut ? (
+              <Loader2 className="animate-spin" size={20} />
+            ) : (
+              <LogOut size={20} className="group-hover:rotate-12 transition-transform" />
+            )}
+            <span>{isLoggingOut ? 'Memproses...' : 'Keluar Sistem'}</span>
           </Button>
         </div>
       </aside>
