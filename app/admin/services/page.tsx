@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/admin/sidebar";
+import { createLog } from "@/lib/logger";
 import {
   Plus,
   Pencil,
@@ -11,12 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Settings2,
-  X,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
   Search,
-  Type,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +24,6 @@ import {
   DialogTitle,
   DialogDescription,
   DialogTrigger,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   AlertDialog,
@@ -59,7 +55,7 @@ export default function ManajemenLayanan() {
   const [newService, setNewService] = useState({
     name: "",
     description: "",
-    estimated_duration: 30, // Default 30 menit sesuai sistem slot
+    estimated_duration: 30,
     prefix_code: "",
   });
   const [editService, setEditService] = useState({
@@ -106,52 +102,101 @@ export default function ManajemenLayanan() {
     if (!newService.prefix_code) return toast.error("Kode Prefix wajib diisi!");
     
     setIsSubmitting(true);
-    const { error } = await supabase.from("services").insert([{
-      ...newService,
-      prefix_code: newService.prefix_code.toUpperCase()
-    }]);
-    
-    if (error) {
-      toast.error("Gagal menambahkan layanan");
-    } else {
+    try {
+      const { error } = await supabase.from("services").insert([{
+        ...newService,
+        prefix_code: newService.prefix_code.toUpperCase()
+      }]);
+      
+      if (error) throw error;
+
+      createLog(
+        'SERVICE_CRUD', 
+        `Admin menambah layanan baru: ${newService.name} (Kode: ${newService.prefix_code.toUpperCase()})`,
+        'info',
+        { detail: newService }
+      );
+
       toast.success("Layanan Berhasil Ditambahkan");
       setOpenAdd(false);
       setNewService({ name: "", description: "", estimated_duration: 30, prefix_code: "" });
       fetchServices();
+    } catch (error: any) {
+      createLog('ERROR', `Gagal tambah layanan: ${error.message}`, 'error');
+      toast.error("Gagal menambahkan layanan");
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    const { error } = await supabase
-      .from("services")
-      .update({
-        name: editService.name,
-        description: editService.description,
-        estimated_duration: editService.estimated_duration,
-        prefix_code: editService.prefix_code.toUpperCase(),
-      })
-      .eq("id", editService.id);
 
-    if (error) {
-      toast.error("Gagal memperbarui layanan");
-    } else {
+    const oldService = services.find((s) => s.id === editService.id);
+
+    try {
+      const { error } = await supabase
+        .from("services")
+        .update({
+          name: editService.name,
+          description: editService.description,
+          estimated_duration: editService.estimated_duration,
+          prefix_code: editService.prefix_code.toUpperCase(),
+        })
+        .eq("id", editService.id);
+
+      if (error) throw error;
+
+      let changes = [];
+      if (oldService.name !== editService.name) 
+        changes.push(`Nama: "${oldService.name}" -> "${editService.name}"`);
+      if (oldService.prefix_code !== editService.prefix_code.toUpperCase()) 
+        changes.push(`Kode: "${oldService.prefix_code}" -> "${editService.prefix_code.toUpperCase()}"`);
+      if (oldService.description !== editService.description)
+        changes.push(`Deskripsi diubah`);
+
+      const detailLog = changes.length > 0 ? changes.join(", ") : "Tidak ada perubahan data";
+
+      createLog(
+        'SERVICE_CRUD', 
+        `Admin mengubah layanan [${oldService.name}]: ${detailLog}`,
+        'info',
+        { before: oldService, after: editService }
+      );
+
       toast.success("Perubahan Disimpan");
       setOpenEdit(false);
       fetchServices();
+    } catch (error: any) {
+      createLog('ERROR', `Gagal update layanan: ${error.message}`, 'error');
+      toast.error("Gagal memperbarui layanan");
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from("services").delete().eq("id", id);
-    if (!error) {
+    const serviceTarget = services.find(s => s.id === id);
+    try {
+      const { error } = await supabase.from("services").delete().eq("id", id);
+      if (error) throw error;
+
+      createLog(
+        'SERVICE_CRUD', 
+        `Admin menghapus layanan: ${serviceTarget?.name} (Kode: ${serviceTarget?.prefix_code})`,
+        'warning',
+        { deleted_data: serviceTarget }
+      );
+
       toast.success("Layanan Dihapus");
       fetchServices();
+    } catch (error: any) {
+      createLog('ERROR', `Gagal hapus layanan: ${error.message}`, 'error');
+      toast.error("Gagal menghapus layanan");
+    } finally {
+      setOpenDelete(null);
     }
-    setOpenDelete(null);
   };
 
   return (
@@ -163,25 +208,19 @@ export default function ManajemenLayanan() {
           
           <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 font-bold">
             <div>
-              <h2 className="text-3xl font-black text-white uppercase tracking-tighter">
-                Manajemen Layanan
-              </h2>
-              <p className="text-indigo-400/80 text-[10px] font-black uppercase tracking-[0.2em]">
-                Konfigurasi Kategori & Kode Prefix
-              </p>
+              <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Manajemen Layanan</h2>
+              <p className="text-indigo-400/80 text-[10px] font-black uppercase tracking-[0.2em]">Konfigurasi Kategori & Kode Prefix</p>
             </div>
 
             <Dialog open={openAdd} onOpenChange={setOpenAdd}>
               <DialogTrigger asChild>
-                <Button size="sm" className="bg-indigo-600 hover:bg-indigo-500 text-white font-black h-10 px-6 rounded-xl shadow-lg gap-2 tracking-widest active:scale-95 transition-all">
+                <Button size="sm" className="bg-indigo-600 hover:bg-indigo-500 text-white font-black h-10 px-6 rounded-xl shadow-lg gap-2 tracking-widest active:translate-y-[2px] active:border-b-0 transition-all border-b-4 border-indigo-800 uppercase text-[10px]">
                   <Plus size={16} /> TAMBAH LAYANAN
                 </Button>
               </DialogTrigger>
-              <DialogContent className="bg-slate-900 border-slate-800 text-white rounded-[2.5rem] shadow-2xl p-10 max-w-lg [&>button]:hidden">
+              <DialogContent className="bg-slate-900 border-slate-800 text-white rounded-[2.5rem] shadow-2xl p-10 max-w-lg border-2">
                 <DialogHeader className="space-y-2">
-                  <div className="p-3 bg-indigo-600 w-fit rounded-2xl mb-2 shadow-lg shadow-indigo-600/20">
-                    <Plus size={24} />
-                  </div>
+                  <div className="p-3 bg-indigo-600 w-fit rounded-2xl mb-2 shadow-lg shadow-indigo-600/20"><Plus size={24} /></div>
                   <DialogTitle className="text-3xl font-black uppercase tracking-tight">Layanan Baru</DialogTitle>
                   <DialogDescription className="text-slate-400 text-sm font-medium italic">Atur prefix kode dan detail pelayanan.</DialogDescription>
                 </DialogHeader>
@@ -192,7 +231,7 @@ export default function ManajemenLayanan() {
                       <Input
                         placeholder="A"
                         maxLength={2}
-                        className="bg-slate-950 border-slate-800 h-14 rounded-2xl text-white font-black text-center text-xl uppercase placeholder:text-slate-800"
+                        className="bg-slate-950 border-slate-800 h-14 rounded-2xl text-white font-black text-center text-xl uppercase"
                         value={newService.prefix_code}
                         onChange={(e) => setNewService({ ...newService, prefix_code: e.target.value })}
                         required
@@ -219,8 +258,8 @@ export default function ManajemenLayanan() {
                     />
                   </div>
                   <div className="flex gap-4 pt-4">
-                    <Button type="button" onClick={() => setOpenAdd(false)} className="flex-1 h-16 bg-slate-800 text-slate-400 font-black rounded-2xl hover:bg-slate-700 uppercase tracking-widest text-xs">Batal</Button>
-                    <Button type="submit" disabled={isSubmitting} className="flex-[2] h-16 bg-indigo-600 text-white font-black text-lg rounded-2xl shadow-xl hover:bg-indigo-500 tracking-tighter">SIMPAN LAYANAN</Button>
+                    <Button type="button" onClick={() => setOpenAdd(false)} className="flex-1 h-16 bg-slate-800 text-slate-400 font-black rounded-2xl hover:bg-slate-700 uppercase tracking-widest text-[10px] border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0 transition-all">Batal</Button>
+                    <Button type="submit" disabled={isSubmitting} className="flex-[2] h-16 bg-indigo-600 text-white font-black text-lg rounded-2xl shadow-xl hover:bg-indigo-500 tracking-tighter border-b-4 border-indigo-800 active:translate-y-[2px] active:border-b-0 transition-all">SIMPAN LAYANAN</Button>
                   </div>
                 </form>
               </DialogContent>
@@ -236,19 +275,19 @@ export default function ManajemenLayanan() {
                   </label>
                   <Input 
                     placeholder="Contoh: Izin atau A..." 
-                    className="bg-slate-950/50 border-slate-800 h-10 px-3.5 text-white rounded-xl focus:border-indigo-500/50 transition-all text-sm"
+                    className="bg-slate-950/50 border-slate-800 h-10 px-3.5 text-white rounded-xl focus:border-indigo-500/50 text-sm"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                 </div>
               </div>
-              <div className="h-10 flex items-center justify-center px-5 bg-indigo-500/5 border border-indigo-500/10 rounded-xl shrink-0">
+              <div className="h-10 flex items-center justify-center px-5 bg-indigo-500/5 border border-indigo-500/10 rounded-xl">
                 <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Total: <span className="text-indigo-400 text-base ml-1 tabular-nums">{filteredServices.length}</span></p>
               </div>
             </div>
           </div>
 
-          <div className="flex-1 bg-slate-900/40 border border-slate-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl backdrop-blur-xl">
+          <div className="flex-1 bg-slate-900/40 border border-slate-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl backdrop-blur-xl border-2">
             <div className="overflow-auto flex-1 custom-scrollbar">
               <table className="w-full text-left border-collapse">
                 <thead className="sticky top-0 bg-slate-950 text-[9px] font-black uppercase text-slate-500 tracking-widest border-b border-slate-800 z-10">
@@ -266,7 +305,7 @@ export default function ManajemenLayanan() {
                     <tr><td colSpan={4} className="py-12 text-center text-slate-600 font-bold uppercase text-[10px]">Data tidak ditemukan</td></tr>
                   ) : (
                     paginatedData.map((s) => (
-                      <tr key={s.id} className="hover:bg-indigo-500/[0.02] transition-colors group">
+                      <tr key={s.id} className="hover:bg-indigo-600/[0.02] transition-colors group">
                         <td className="px-5 py-3 text-center">
                           <Badge className="bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 font-black text-sm px-3 py-1 rounded-lg">
                             {s.prefix_code || "A"}
@@ -281,8 +320,8 @@ export default function ManajemenLayanan() {
                         <td className="px-5 py-3 text-[11px] text-slate-400 truncate max-w-[250px]">{s.description || "-"}</td>
                         <td className="px-5 py-3 text-center">
                           <div className="flex justify-center gap-2">
-                            <Button onClick={() => { setEditService({ id: s.id, name: s.name, description: s.description || "", estimated_duration: s.estimated_duration || 30, prefix_code: s.prefix_code || "" }); setOpenEdit(true); }} variant="outline" size="sm" className="h-8 w-8 p-0 bg-slate-900 border-slate-800 hover:bg-indigo-600 text-white transition-all"><Pencil size={14} /></Button>
-                            <Button onClick={() => setOpenDelete(s.id)} variant="outline" size="sm" className="h-8 w-8 p-0 bg-slate-900 border-slate-800 hover:bg-red-600 text-white transition-all"><Trash2 size={14} /></Button>
+                            <Button onClick={() => { setEditService({ id: s.id, name: s.name, description: s.description || "", estimated_duration: s.estimated_duration || 30, prefix_code: s.prefix_code || "" }); setOpenEdit(true); }} variant="outline" size="sm" className="h-9 w-9 p-0 bg-slate-900 border-slate-800 hover:bg-indigo-600 text-white transition-all border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0"><Pencil size={14} /></Button>
+                            <Button onClick={() => setOpenDelete(s.id)} variant="outline" size="sm" className="h-9 w-9 p-0 bg-slate-900 border-slate-800 hover:bg-red-600 text-white transition-all border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0"><Trash2 size={14} /></Button>
                           </div>
                         </td>
                       </tr>
@@ -295,8 +334,8 @@ export default function ManajemenLayanan() {
             <div className="bg-slate-950/50 p-4 border-t border-slate-800 flex justify-between items-center shrink-0">
               <p className="text-[10px] font-black text-slate-500 uppercase">Halaman {currentPage} dari {totalPages || 1}</p>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)} className="h-8 w-8 p-0 bg-slate-900 border-slate-800"><ChevronLeft size={16} /></Button>
-                <Button variant="outline" size="sm" disabled={currentPage >= totalPages || totalPages === 0} onClick={() => setCurrentPage((p) => p + 1)} className="h-8 w-8 p-0 bg-slate-900 border-slate-800"><ChevronRight size={16} /></Button>
+                <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)} className="h-9 w-9 p-0 bg-slate-900 border-slate-800 hover:bg-indigo-600 text-white border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0"><ChevronLeft size={16} /></Button>
+                <Button variant="outline" size="sm" disabled={currentPage >= totalPages || totalPages === 0} onClick={() => setCurrentPage((p) => p + 1)} className="h-9 w-9 p-0 bg-slate-900 border-slate-800 hover:bg-indigo-600 text-white border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0"><ChevronRight size={16} /></Button>
               </div>
             </div>
           </div>
@@ -305,9 +344,9 @@ export default function ManajemenLayanan() {
 
       {/* EDIT MODAL */}
       <Dialog open={openEdit} onOpenChange={setOpenEdit}>
-        <DialogContent className="bg-[#0f172a] border-slate-800 text-white rounded-[2.5rem] p-10 shadow-2xl [&>button]:hidden">
+        <DialogContent className="bg-[#0f172a] border-slate-800 text-white rounded-[2.5rem] p-10 shadow-2xl border-2">
           <DialogHeader className="space-y-2">
-            <div className="p-3 bg-amber-500/20 w-fit rounded-2xl mb-2 border border-amber-500/30"><Settings2 size={24} className="text-amber-500" /></div>
+            <div className="p-3 bg-amber-500/20 w-fit rounded-2xl mb-2 border border-amber-500/30 shadow-lg shadow-amber-500/10"><Settings2 size={24} className="text-amber-500" /></div>
             <DialogTitle className="text-3xl font-black uppercase tracking-tight text-white">Ubah Layanan</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleUpdate} className="space-y-6 pt-6">
@@ -326,8 +365,8 @@ export default function ManajemenLayanan() {
               <Input className="bg-slate-950 border-slate-800 h-16 rounded-2xl text-white" value={editService.description} onChange={(e) => setEditService({ ...editService, description: e.target.value })} />
             </div>
             <div className="flex gap-4 pt-8">
-              <Button type="button" onClick={() => setOpenEdit(false)} className="h-16 flex-1 text-slate-400 font-bold hover:bg-white/5 rounded-2xl uppercase text-xs">BATAL</Button>
-              <Button type="submit" disabled={isSubmitting} className="h-16 flex-[2] bg-indigo-600 text-white font-black text-lg rounded-2xl shadow-xl hover:bg-indigo-500 tracking-tighter">SIMPAN PERUBAHAN</Button>
+              <Button type="button" onClick={() => setOpenEdit(false)} className="h-16 flex-1 text-slate-400 font-bold hover:bg-white/5 rounded-2xl uppercase text-[10px] border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0 transition-all">BATAL</Button>
+              <Button type="submit" disabled={isSubmitting} className="h-16 flex-[2] bg-indigo-600 text-white font-black text-lg rounded-2xl shadow-xl hover:bg-indigo-500 tracking-tighter border-b-4 border-indigo-800 active:translate-y-[2px] active:border-b-0 transition-all">SIMPAN PERUBAHAN</Button>
             </div>
           </form>
         </DialogContent>
@@ -335,7 +374,7 @@ export default function ManajemenLayanan() {
 
       {/* DELETE DIALOG */}
       <AlertDialog open={!!openDelete} onOpenChange={(o) => !o && setOpenDelete(null)}>
-        <AlertDialogContent className="bg-[#0f172a] border-slate-800 text-white rounded-[2rem] p-8 shadow-2xl">
+        <AlertDialogContent className="bg-[#0f172a] border-slate-800 text-white rounded-[2.5rem] p-8 shadow-2xl border-2">
           <AlertDialogHeader className="space-y-4">
             <div className="p-4 bg-red-500/10 border border-red-500/20 w-fit rounded-full text-red-500 mx-auto"><AlertCircle size={40} /></div>
             <div className="text-center space-y-2">
@@ -344,8 +383,8 @@ export default function ManajemenLayanan() {
             </div>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-8 flex gap-3 sm:justify-center">
-            <AlertDialogCancel className="h-14 px-8 bg-slate-800 text-white border-none rounded-xl font-bold uppercase text-xs">BATAL</AlertDialogCancel>
-            <AlertDialogAction onClick={() => openDelete && handleDelete(openDelete)} className="h-14 px-8 bg-red-600 text-white font-black rounded-xl hover:bg-red-500 shadow-lg shadow-red-600/20 uppercase text-xs">YA, HAPUS</AlertDialogAction>
+            <AlertDialogCancel className="h-14 px-8 bg-slate-800 text-white border-none rounded-xl font-bold uppercase text-[10px] tracking-widest border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0 transition-all">BATAL</AlertDialogCancel>
+            <AlertDialogAction onClick={() => openDelete && handleDelete(openDelete)} className="h-14 px-8 bg-red-600 text-white font-black rounded-xl hover:bg-red-500 shadow-lg shadow-red-600/20 uppercase text-[10px] tracking-widest border-b-4 border-red-800 active:translate-y-[2px] active:border-b-0 transition-all">YA, HAPUS</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

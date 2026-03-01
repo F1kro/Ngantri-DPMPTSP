@@ -8,8 +8,6 @@ import { createClient } from "@/lib/supabase/client";
 import { getBookingsFromCookie } from "@/lib/cookies";
 import { unlockTTS } from "@/lib/notifications";
 
-// 3. Di dalam return, wrap konten dengan kondisi:
-
 import {
   requestNotificationPermission,
   notifyQueueCalled,
@@ -30,6 +28,8 @@ import {
   Home,
   SkipForward,
   AlertCircle,
+  CalendarDays,
+  Coffee,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -106,17 +106,18 @@ export default function PersonalMonitorPage() {
   const [userBookingDetails, setUserBookingDetails] = useState<any[]>([]);
   const [skippedInfo, setSkippedInfo] = useState<Record<string, { reason: string; at: Date }>>({});
   
+  // LOGIC TAMBAHAN UNTUK SMART ALERT
+  const [allUserBookings, setAllUserBookings] = useState<any[]>([]);
+  
   useEffect(() => {
     const handler = () => unlockTTS();
     window.addEventListener('pointerdown', handler, { once: true });
     return () => window.removeEventListener('pointerdown', handler);
   }, []);
 
-  // ✅ FIX 1: Refs untuk menghindari stale closure di realtime listener
   const notificationsEnabledRef = useRef(false);
   const userBookingIdsRef = useRef<string[]>([]);
 
-  // Sync ref setiap kali state berubah
   useEffect(() => {
     notificationsEnabledRef.current = notificationsEnabled;
   }, [notificationsEnabled]);
@@ -140,7 +141,6 @@ export default function PersonalMonitorPage() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // ✅ FIX 2: fetchData pakai useCallback dan tidak bergantung pada state userBookingIds
   const fetchData = useCallback(async () => {
     const todayWita = getWitaDateString();
 
@@ -154,7 +154,6 @@ export default function PersonalMonitorPage() {
     ]);
 
     const allBookings = bookingRes.data || [];
-    // ✅ Pakai ref, bukan state — selalu fresh
     const idsToUse = userBookingIdsRef.current;
 
     setBookings(allBookings);
@@ -174,15 +173,26 @@ export default function PersonalMonitorPage() {
     setServices(sortedServices);
   }, [supabase]);
 
-  // LOAD COOKIES & INITIAL FETCH
+  // FETCH SEMUA BOOKING USER UNTUK SMART ALERT (Masa Depan)
+  const fetchAllUserBookings = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const { data } = await supabase
+      .from("bookings")
+      .select("*, services(name)")
+      .in("id", ids)
+      .neq("status", "completed")
+      .neq("status", "cancelled");
+    setAllUserBookings(data || []);
+  }, [supabase]);
+
   useEffect(() => {
     const cookieBookings = getBookingsFromCookie();
     const ids = cookieBookings.map((b: any) => b.id);
 
-    // ✅ Set ref dulu sebelum fetch agar fetchData langsung pakai value terbaru
     userBookingIdsRef.current = ids;
     setUserBookingIds(ids);
     setUserBookingDetails(cookieBookings);
+    fetchAllUserBookings(ids);
 
     if (isNotificationSupported()) {
       const perm = getNotificationPermission();
@@ -191,9 +201,8 @@ export default function PersonalMonitorPage() {
     }
 
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, fetchAllUserBookings]);
 
-  // ✅ FIX 3: Realtime listener — gunakan REF, bukan state langsung
   useEffect(() => {
     const channel = supabase
       .channel("user-live-monitor")
@@ -204,20 +213,16 @@ export default function PersonalMonitorPage() {
           const updated = payload.new as any;
           const old = payload.old as any;
 
-          // Selalu fetch ulang untuk update UI
           fetchData();
 
-          // ✅ Pakai ref, bukan state — tidak stale
           const currentIds = userBookingIdsRef.current;
           if (!currentIds.includes(updated.id)) return;
 
           const isNotifEnabled = notificationsEnabledRef.current;
 
-          // KASUS 1: Baru dipanggil (waiting -> in_progress)
           if (updated.status === "in_progress" && old.status === "waiting") {
             if (isNotifEnabled) notifyQueueCalled(updated.booking_number);
             else {
-              // ✅ FIX: Tetap bunyikan TTS meski notif browser off
               const nomorEja = updated.booking_number.replace("-", " ").split("").join(" ");
               playTTSNotification(`Nomor antrean ${nomorEja}, silakan menuju loket pelayanan.`);
             }
@@ -226,10 +231,6 @@ export default function PersonalMonitorPage() {
               icon: <Bell className="text-indigo-500" size={24} />,
             });
           }
-
-          // ✅ FIX KASUS 2: Panggil Ulang (in_progress -> in_progress, updated_at berubah)
-          // Masalah lama: old.updated_at bisa null dari Supabase Realtime
-          // Fix: cukup cek status sama-sama in_progress, selalu anggap ini panggil ulang
           else if (updated.status === "in_progress" && old.status === "in_progress") {
             if (isNotifEnabled) notifyQueueCalled(updated.booking_number);
             else {
@@ -241,8 +242,6 @@ export default function PersonalMonitorPage() {
               icon: <Bell className="text-orange-500" size={24} />,
             });
           }
-
-          // KASUS 3: Di-skip (in_progress -> waiting)
           else if (updated.status === "waiting" && old.status === "in_progress") {
             const reasonDisplay = getSkipReasonDisplay(updated.notes);
             setSkippedInfo((prev) => ({
@@ -257,8 +256,6 @@ export default function PersonalMonitorPage() {
               { duration: 15000, icon: <SkipForward className="text-amber-500" size={24} /> }
             );
           }
-
-          // KASUS 4: Dibatalkan
           else if (updated.status === "cancelled") {
             toast.error(`Antrean ${updated.booking_number} Dibatalkan`, {
               icon: <AlertCircle className="text-red-500" />,
@@ -271,8 +268,6 @@ export default function PersonalMonitorPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-    // ✅ Tidak perlu notificationsEnabled/userBookingIds sebagai dependency
-    // karena sudah pakai ref — channel tidak perlu re-subscribe
   }, [fetchData, supabase]);
 
   const handleToggleNotifications = async () => {
@@ -296,6 +291,12 @@ export default function PersonalMonitorPage() {
       (b) => b.service_id === serviceId && userBookingIdsRef.current.includes(b.id) && b.status !== "completed"
     );
   };
+
+  // Logika Cek Antrean Masa Depan (Besok/Lusa)
+  const futureBookings = useMemo(() => {
+    const today = getWitaDateString();
+    return allUserBookings.filter(b => b.booking_date > today);
+  }, [allUserBookings]);
 
   const totalPages = Math.ceil(services.length / (itemsPerPage || 1));
   const currentServices = services.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -327,19 +328,19 @@ export default function PersonalMonitorPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 md:gap-3">
-            <Link href="/" className="hidden xs:block">
-              <Button variant="outline" className="h-10 md:h-12 px-4 md:px-6 rounded-xl bg-slate-800 border-slate-700 text-slate-300 font-bold text-[10px] md:text-xs uppercase gap-2">
+            <Link href="/">
+              <Button variant="outline" className="h-10 md:h-12 px-4 md:px-6 rounded-xl bg-slate-800 border-slate-700 text-slate-300 font-bold text-[10px] md:text-xs uppercase gap-2 border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0 transition-all">
                 <Home size={16} />
-                <span>Dashboard</span>
+                <span>Home</span>
               </Button>
             </Link>
             <Button
               onClick={handleToggleNotifications}
               variant="outline"
-              className={`h-10 md:h-12 px-4 md:px-6 rounded-xl font-bold text-[10px] md:text-xs uppercase gap-2 flex-1 md:flex-none transition-all ${
+              className={`h-10 md:h-12 px-4 md:px-6 rounded-xl font-bold text-[10px] md:text-xs uppercase gap-2 flex-1 md:flex-none transition-all active:translate-y-[2px] active:border-b-0 border-b-4 ${
                 notificationsEnabled
-                  ? "bg-emerald-600/20 border-emerald-600/30 text-emerald-400"
-                  : "bg-slate-800 border-slate-700 text-slate-400"
+                  ? "bg-emerald-600/20 border-emerald-600/30 text-emerald-400 border-b-emerald-800"
+                  : "bg-slate-800 border-slate-700 text-slate-400 border-b-slate-950"
               }`}
             >
               {notificationsEnabled ? <Bell size={16} /> : <BellOff size={16} />}
@@ -347,7 +348,7 @@ export default function PersonalMonitorPage() {
             </Button>
             {userBookingIds.length > 0 && (
               <Link href="/riwayat-antrian" className="flex-1 md:flex-none">
-                <Button variant="outline" className="w-full h-10 md:h-12 px-4 md:px-6 rounded-xl bg-indigo-600/20 border-indigo-600/30 text-indigo-400 font-bold text-[10px] md:text-xs uppercase gap-2">
+                <Button variant="outline" className="w-full h-10 md:h-12 px-4 md:px-6 rounded-xl bg-indigo-600/20 border-indigo-600/30 text-indigo-400 font-bold text-[10px] md:text-xs uppercase gap-2 border-b-4 border-indigo-900 active:translate-y-[2px] active:border-b-0 transition-all">
                   <HistoryIcon size={16} />
                   <span>Riwayat</span>
                 </Button>
@@ -357,8 +358,31 @@ export default function PersonalMonitorPage() {
         </div>
       </header>
 
+      {/* SMART ALERT: Jika ada antrean untuk besok/lusa */}
+      {futureBookings.length > 0 && (
+        <div className="bg-amber-500/10 border-2 border-amber-500/30 p-4 rounded-xl flex items-start gap-3 shrink-0 shadow-lg border-b-4 border-amber-800">
+          <CalendarDays size={20} className="text-amber-500 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Antrean Terjadwal</p>
+            <p className="text-xs text-amber-200/80 font-bold leading-tight">
+              Anda memiliki antrean <span className="text-white">[{futureBookings[0].booking_number}]</span> untuk tanggal <span className="text-white">{futureBookings[0].booking_date}</span>. Monitoring live akan aktif pada tanggal tersebut.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* INFO JAM OPERASIONAL TUTUP (Jika > 16:00 WITA) */}
+      {new Date().getHours() >= 16 && (
+        <div className="bg-slate-800/40 border border-slate-700 p-4 rounded-xl flex items-center gap-3 shrink-0 shadow-md border-b-4 border-slate-950">
+          <Coffee size={20} className="text-slate-400" />
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.15em]">
+            Layanan hari ini berakhir. Monitoring dibuka kembali besok pukul 08:00 WITA.
+          </p>
+        </div>
+      )}
+
       {activeUserBookingsCount > 0 && (
-        <div className="bg-indigo-600/10 border-2 border-indigo-600/30 p-3 md:p-4 rounded-xl flex items-center gap-3 shrink-0 shadow-lg shadow-indigo-500/5">
+        <div className="bg-indigo-600/10 border-2 border-indigo-600/30 p-3 md:p-4 rounded-xl flex items-center gap-3 shrink-0 shadow-lg shadow-indigo-500/5 border-b-4 border-indigo-900">
           <Star size={20} className="text-indigo-400 fill-indigo-400" />
           <p className="text-xs md:text-sm font-black text-indigo-300 uppercase tracking-tight">
             Layanan Anda Diprioritaskan!
@@ -370,7 +394,7 @@ export default function PersonalMonitorPage() {
         <Button
           disabled={currentPage === 1}
           onClick={() => setCurrentPage((p) => p - 1)}
-          className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-colors"
+          className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-all border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0"
         >
           <ChevronLeft />
         </Button>
@@ -380,7 +404,7 @@ export default function PersonalMonitorPage() {
         <Button
           disabled={currentPage >= totalPages}
           onClick={() => setCurrentPage((p) => p + 1)}
-          className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-colors"
+          className="h-10 w-10 md:h-12 md:w-12 rounded-xl bg-slate-800 border-slate-700 hover:bg-indigo-600 transition-all border-b-4 border-slate-950 active:translate-y-[2px] active:border-b-0"
         >
           <ChevronRight />
         </Button>
@@ -471,7 +495,7 @@ export default function PersonalMonitorPage() {
                   {userBookingInService &&
                     userBookingInService.status === "waiting" &&
                     !userSkippedBooking && (
-                      <div className="w-full p-3 bg-indigo-600/10 border border-indigo-600/20 rounded-xl flex justify-between items-center">
+                      <div className="w-full p-3 bg-indigo-600/10 border border-indigo-600/20 rounded-xl flex justify-between items-center border-b-4 border-indigo-900">
                         <p className="text-[8px] font-black text-indigo-400 uppercase">
                           No. Anda: {userBookingInService.booking_number}
                         </p>
@@ -483,7 +507,7 @@ export default function PersonalMonitorPage() {
 
                   {userSkippedBooking && skippedInfo[userSkippedBooking.id] && (
                     <div className="w-full space-y-2">
-                      <div className="w-full p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-3 text-left">
+                      <div className="w-full p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-3 text-left border-b-4 border-amber-800">
                         <SkipForward size={16} className="text-amber-400 mt-0.5 shrink-0" />
                         <div>
                           <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest">
@@ -515,6 +539,6 @@ export default function PersonalMonitorPage() {
           );
         })}
       </div>
-      </main>
+    </main>
   );
 }

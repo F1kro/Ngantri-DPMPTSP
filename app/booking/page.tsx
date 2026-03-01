@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { saveBookingToCookie } from "@/lib/cookies";
+import { createLog } from "@/lib/logger"; // IMPORT LOGGER
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +25,7 @@ import {
   Briefcase,
   Clock,
   Calendar,
+  AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -82,7 +84,7 @@ export default function BookingPage() {
       .from("bookings")
       .select("booking_time")
       .eq("booking_date", formData.date)
-      .neq("status", "cancelled"); // Jika dicancel admin, slot jadi tersedia lagi
+      .neq("status", "cancelled");
 
     if (data) setBookedSlots(data.map((b) => b.booking_time));
   };
@@ -91,6 +93,22 @@ export default function BookingPage() {
     fetchBookedSlots(); 
   }, [formData.date]);
 
+  // Logika pengecekan ketersediaan slot hari ini
+  const isToday = formData.date === getWitaDateString(now);
+  const availableSlots = TIME_SLOTS.filter((slot) => {
+    const isBooked = bookedSlots.includes(slot);
+    const [sH, sM] = slot.split(":").map(Number);
+    const isPast = isToday && (sH * 60 + sM) <= (now.getHours() * 60 + now.getMinutes());
+    return !isBooked && !isPast;
+  });
+
+  const isAllPast = isToday && TIME_SLOTS.every((slot) => {
+    const [sH, sM] = slot.split(":").map(Number);
+    return (sH * 60 + sM) <= (now.getHours() * 60 + now.getMinutes());
+  });
+
+  const isAllBooked = TIME_SLOTS.every((slot) => bookedSlots.includes(slot));
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.serviceId || !formData.time) return toast.error("Lengkapi data!");
@@ -98,7 +116,6 @@ export default function BookingPage() {
     setLoading(true);
     try {
       // 1. Validasi Waktu (WITA)
-      const isToday = formData.date === getWitaDateString(now);
       if (isToday) {
         const [h, m] = formData.time.split(":").map(Number);
         const slotMins = h * 60 + m;
@@ -108,7 +125,7 @@ export default function BookingPage() {
         }
       }
 
-      // 2. Cek apakah slot masih tersedia (Double check anti-bentrok)
+      // 2. Cek apakah slot masih tersedia
       const { data: slotTerisi } = await supabase
         .from("bookings")
         .select("id")
@@ -123,7 +140,7 @@ export default function BookingPage() {
       }
 
       // 3. Ambil data prefix & hitung antrean
-      const { data: sData } = await supabase.from("services").select("prefix_code").eq("id", formData.serviceId).single();
+      const { data: sData } = await supabase.from("services").select("name, prefix_code").eq("id", formData.serviceId).single();
       const { count } = await supabase.from("bookings").select("*", { count: "exact", head: true }).eq("booking_date", formData.date);
       
       const num = (count || 0) + 1;
@@ -142,19 +159,28 @@ export default function BookingPage() {
       }]).select();
 
       if (error) {
-        // Handle error unique constraint dari postgres
         if (error.code === "23505") throw new Error("Slot ini sudah dipesan orang lain!");
         throw error;
       }
 
       if (data?.[0]) {
+        // LOG: Booking Berhasil
+        createLog(
+          'BOOKING', 
+          `Pengunjung baru: ${formData.name} mengambil antrean ${booking_number} untuk layanan ${sData?.name}`,
+          'info',
+          { booking_id: data[0].id, visitor_name: formData.name }
+        );
+
         saveBookingToCookie({ ...data[0] });
         toast.success("Booking berhasil!");
         router.push(`/booking-confirmation/${data[0].id}`);
       }
     } catch (error: any) {
+      // LOG: Gagal Booking
+      createLog('ERROR', `Gagal ambil antrean: ${error.message}`, 'error', { visitor_name: formData.name });
       toast.error(error.message);
-      fetchBookedSlots(); // Refresh slot jika gagal
+      fetchBookedSlots();
     } finally {
       setLoading(false);
     }
@@ -186,7 +212,6 @@ export default function BookingPage() {
           <Card className="bg-slate-900/40 border-slate-800 backdrop-blur-xl shadow-2xl rounded-[2.5rem] overflow-hidden border-2">
             <CardContent className="p-6 md:p-10">
               <form onSubmit={handleSubmit} className="space-y-5">
-                {/* Inputs */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><User size={12} /> Nama</Label>
@@ -198,13 +223,18 @@ export default function BookingPage() {
                   </div>
                 </div>
 
-                {/* Tanggal */}
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Calendar size={12} /> Tanggal Kedatangan</Label>
-                  <Input type="date" min={getWitaDateString(getWitaNow())} className="h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value, time: "" })} required />
+                  <Label className="text-[10px] font-white text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Calendar size={12} /> Tanggal Kedatangan</Label>
+                  <Input 
+                    type="date" 
+                    min={getWitaDateString(getWitaNow())} 
+                    className="h-12 bg-slate-950/50 border-slate-800 rounded-2xl text-white font-bold text-sm [color-scheme:dark]" 
+                    value={formData.date} 
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value, time: "" })} 
+                    required 
+                  />
                 </div>
 
-                {/* Layanan */}
                 <div className="space-y-2">
                   <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Briefcase size={12} /> Layanan</Label>
                   <Select onValueChange={(val) => setFormData({ ...formData, serviceId: val })}>
@@ -215,17 +245,26 @@ export default function BookingPage() {
                   </Select>
                 </div>
 
-                {/* Grid Slot Waktu */}
                 <div className="space-y-2">
                   <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2"><Clock size={12} /> Jam Tersedia</Label>
+                  
+                  {/* Alert Kondisi Full / Selesai */}
+                  {availableSlots.length === 0 && (
+                    <div className="flex items-center gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-500 mb-4">
+                      <AlertCircle size={18} />
+                      <p className="text-[11px] font-bold uppercase leading-tight">
+                        {isAllPast 
+                          ? "Jam layanan hari ini sudah selesai, silahkan booking antrean untuk besok." 
+                          : "Slot layanan untuk hari ini sudah full, silahkan booking antrean untuk besok."}
+                      </p>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                     {TIME_SLOTS.map((slot) => {
                       const isBooked = bookedSlots.includes(slot);
-                      const isToday = formData.date === getWitaDateString(now);
-                      const isPast = isToday && (() => {
-                        const [sH, sM] = slot.split(":").map(Number);
-                        return (sH * 60 + sM) <= (now.getHours() * 60 + now.getMinutes());
-                      })();
+                      const [sH, sM] = slot.split(":").map(Number);
+                      const isPast = isToday && (sH * 60 + sM) <= (now.getHours() * 60 + now.getMinutes());
                       
                       const isDisabled = isBooked || isPast;
                       const isSelected = formData.time === slot;

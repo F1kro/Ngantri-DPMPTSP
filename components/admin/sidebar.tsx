@@ -1,5 +1,14 @@
 'use client'
-import { LayoutDashboard, Database, ClipboardList, LogOut, ChevronRight, AlertCircle, ListChecks } from 'lucide-react'
+import { 
+  LayoutDashboard, 
+  Database, 
+  ClipboardList, 
+  LogOut, 
+  ChevronRight, 
+  AlertCircle, 
+  ListChecks,
+  History // Icon baru untuk Log
+} from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -27,6 +36,7 @@ export default function AdminSidebar() {
     { label: 'Manajemen Antrean', icon: <ListChecks size={20}/>, path: '/admin/antrian' },
     { label: 'Manajemen Layanan', icon: <Database size={20}/>, path: '/admin/services' },
     { label: 'Rekap Antrean', icon: <ClipboardList size={20}/>, path: '/admin/rekap' },
+    { label: 'Log Sistem', icon: <History size={20}/>, path: '/admin/logs' }, // Menu Baru
   ]
 
   const handleLogout = async () => {
@@ -34,17 +44,12 @@ export default function AdminSidebar() {
       setIsLoggingOut(true)
       setShowLogoutDialog(false)
       
-      // 1. Sign out dari Supabase (ini akan clear cookies secara otomatis)
-      await supabase.auth.signOut({
-        scope: 'global' // Important: ini akan logout dari semua tabs/windows
-      })
+      await supabase.auth.signOut({ scope: 'global' })
 
-      // 2. Clear semua storage
       if (typeof window !== 'undefined') {
         localStorage.clear()
         sessionStorage.clear()
         
-        // 3. Clear semua cookies manually (optional tapi recommended)
         document.cookie.split(";").forEach((c) => {
           document.cookie = c
             .replace(/^ +/, "")
@@ -52,12 +57,10 @@ export default function AdminSidebar() {
         })
       }
 
-      // 4. Hard redirect (PENTING: pakai window.location, bukan router.push)
       window.location.href = '/admin/login'
       
     } catch (error) {
       console.error('Logout error:', error)
-      // Tetap redirect even if error
       window.location.href = '/admin/login'
     }
   }
@@ -65,7 +68,6 @@ export default function AdminSidebar() {
   return (
     <>
       <aside className="w-72 bg-slate-950 border-r border-slate-800 hidden lg:flex flex-col h-screen shrink-0 sticky top-0 overflow-hidden">
-        {/* Header Sidebar */}
         <div className="p-8 border-b border-slate-800 flex items-center gap-3 shrink-0">
           <div className="p-2 bg-indigo-600 rounded-xl shadow-lg shadow-indigo-500/20">
             <Database size={24} className="text-white" />
@@ -73,7 +75,6 @@ export default function AdminSidebar() {
           <span className="text-xl font-black uppercase tracking-tighter text-white">ANTRI DPMPTSP</span>
         </div>
         
-        {/* Navigasi */}
         <nav className="flex-1 p-6 space-y-2 overflow-y-auto custom-scrollbar">
           {menus.map((menu) => (
             <button
@@ -93,7 +94,6 @@ export default function AdminSidebar() {
           ))}
         </nav>
 
-        {/* Footer Sidebar */}
         <div className="p-6 border-t border-slate-800 shrink-0">
           <Button 
             variant="ghost" 
@@ -106,7 +106,6 @@ export default function AdminSidebar() {
         </div>
       </aside>
 
-      {/* ALERT DELETE - Style Gahar (Sama persis dengan Manajemen Layanan) */}
       <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
         <AlertDialogContent className="bg-[#0f172a] border-slate-800 text-white rounded-[2rem] p-8 shadow-2xl shadow-red-500/10">
           <AlertDialogHeader className="space-y-4">
