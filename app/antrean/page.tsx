@@ -11,7 +11,6 @@ import { unlockTTS } from "@/lib/notifications";
 import {
   requestNotificationPermission,
   notifyQueueCalled,
-  getNotificationPermission,
   isNotificationSupported,
   playTTSNotification,
 } from "@/lib/notifications";
@@ -43,6 +42,12 @@ const getWitaDateString = () => {
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+};
+
+const getWitaHour = () => {
+  const now = new Date();
+  const witaString = now.toLocaleString("en-US", { timeZone: "Asia/Makassar" });
+  return new Date(witaString).getHours();
 };
 
 const MonitorTimer = ({
@@ -96,14 +101,12 @@ const getSkipReasonDisplay = (notes: string | null) => {
 
 export default function PersonalMonitorPage() {
   const supabase = createClient();
-  const [ttsReady, setTtsReady] = useState(false);
   const [bookings, setBookings] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(3);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [userBookingIds, setUserBookingIds] = useState<string[]>([]);
-  const [userBookingDetails, setUserBookingDetails] = useState<any[]>([]);
   const [skippedInfo, setSkippedInfo] = useState<Record<string, { reason: string; at: Date }>>({});
   
   // LOGIC TAMBAHAN UNTUK SMART ALERT
@@ -191,7 +194,6 @@ export default function PersonalMonitorPage() {
 
     userBookingIdsRef.current = ids;
     setUserBookingIds(ids);
-    setUserBookingDetails(cookieBookings);
     fetchAllUserBookings(ids);
 
     // LOGIKA: OTOMATIS OFF SAAT REFRESH/BUKA BARU
@@ -285,7 +287,7 @@ export default function PersonalMonitorPage() {
       if (permission === "granted") {
         notificationsEnabledRef.current = true;
         setNotificationsEnabled(true);
-        toast.success("✅ Notifikasi & Suara AKTIF!");
+        toast.success("Notifikasi dan suara AKTIF!");
       }
     }
   };
@@ -302,11 +304,15 @@ export default function PersonalMonitorPage() {
     return allUserBookings.filter(b => b.booking_date > today);
   }, [allUserBookings]);
 
-  const totalPages = Math.ceil(services.length / (itemsPerPage || 1));
+  const totalPages = Math.max(1, Math.ceil(services.length / (itemsPerPage || 1)));
   const currentServices = services.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
   const activeUserBookingsCount = bookings.filter(
     (b) => userBookingIdsRef.current.includes(b.id) && b.status !== "completed"
   ).length;
+
+  useEffect(() => {
+    setCurrentPage((prev) => Math.min(prev, totalPages));
+  }, [totalPages]);
 
   return (
     <main className="min-h-screen w-full bg-[#020617] text-slate-100 font-sans p-3 md:p-10 flex flex-col gap-4 md:gap-6 overflow-hidden">
@@ -373,7 +379,7 @@ export default function PersonalMonitorPage() {
       )}
 
       {/* INFO JAM OPERASIONAL TUTUP (Jika > 16:00 WITA) */}
-      {new Date().getHours() >= 16 && (
+      {getWitaHour() >= 16 && (
         <div className="bg-slate-800/40 border border-slate-700 p-4 rounded-xl flex items-center gap-3 shrink-0 shadow-md border-b-4 border-slate-950">
           <Coffee size={20} className="text-slate-400" />
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.15em]">

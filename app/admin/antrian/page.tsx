@@ -17,7 +17,7 @@ import {
   XCircle,
   UserCheck,
   AlertTriangle,
-  Loader2, // Tambah loader icon
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,13 +39,30 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 
+// --- HELPER NOTIFIKASI WA (FONNTE) ---
+const sendWaNotification = (noHp: string, nomorAntrian: string) => {
+  if (!noHp) return;
+  
+  // Format nomor: Ubah 08xxx menjadi 628xxx
+  const formattedPhone = noHp.startsWith('0') ? '62' + noHp.slice(1) : noHp;
+
+  fetch('/api/notif-wa', {
+    method: 'POST',
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      phone: formattedPhone,
+      message: `Halo! Nomor antrian *${nomorAntrian}* silakan menuju loket DPMPTSP Lombok Barat sekarang. Terima kasih.`,
+    }),
+  }).catch(err => console.error("Fonnte Error:", err));
+};
+
 // --- LOGIKA WAKTU WITA ---
 const getWitaDateString = (date: Date = new Date()) => {
   const witaString = date.toLocaleString("en-US", { timeZone: "Asia/Makassar" });
   const d = new Date(witaString);
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
 
@@ -82,8 +99,7 @@ export default function ManajemenAntrean() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
-  const [mounted, setMounted] = useState(false);
-  const [isCalling, setIsCalling] = useState(false); // STATE BARU UNTUK CEGAH DOUBLE CLICK
+  const [isCalling, setIsCalling] = useState(false);
   
   const [filterDate, setFilterDate] = useState(""); 
   
@@ -190,7 +206,6 @@ export default function ManajemenAntrean() {
   }, [fetchData, supabase]);
 
   useEffect(() => {
-    setMounted(true);
     const loadVoices = () => { window.speechSynthesis.getVoices(); };
     loadVoices();
     if (window.speechSynthesis.onvoiceschanged !== undefined) {
@@ -212,7 +227,7 @@ export default function ManajemenAntrean() {
     [bookings, selectedServiceId]
   );
 
-  const handleAction = async (type: "NEXT" | "SELESAI" | "ULANG" | "CANCEL" | "SWAP", targetId?: string) => {
+  const handleAction = async (type: "NEXT" | "SELESAI" | "ULANG" | "SWAP", targetId?: string) => {
     if (!isDateToday) return toast.error("Hanya bisa memproses antrean hari ini!");
     if (!selectedServiceId) return toast.warning("Pilih jenis layanan terlebih dahulu");
 
@@ -222,14 +237,21 @@ export default function ManajemenAntrean() {
         if (!next) return toast.info("Tidak ada antrean menunggu");
         if (activeQueue) return toast.error("Selesaikan antrean aktif dulu!");
         
-        setIsCalling(true); // Mulai loading
-        const { error } = await supabase.from("bookings").update({ status: "in_progress", updated_at: new Date().toISOString() }).eq("id", next.id);
-        if (!error) {
-          createLog('CALL', `Memanggil antrean ${next.booking_number}`);
-          await panggilSuara(next.booking_number); // Tunggu proses suara
-          await fetchData();
+        setIsCalling(true);
+        try {
+          const { error } = await supabase.from("bookings").update({ status: "in_progress", updated_at: new Date().toISOString() }).eq("id", next.id);
+          if (!error) {
+            createLog('CALL', `Memanggil antrean ${next.booking_number}`);
+            
+            // KIRIM WA (Asinkron agar tidak membebani suara)
+            sendWaNotification(next.visitor_phone, next.booking_number);
+
+            await panggilSuara(next.booking_number);
+            await fetchData();
+          }
+        } finally {
+          setIsCalling(false);
         }
-        setIsCalling(false); // Selesai loading
 
       } else if (type === "SELESAI" && activeQueue) {
         const { error } = await supabase.from("bookings").update({ status: "completed" }).eq("id", activeQueue.id);
@@ -238,18 +260,21 @@ export default function ManajemenAntrean() {
           await fetchData();
         }
       } else if (type === "ULANG" && activeQueue) {
-        setIsCalling(true); // Mulai loading
-        const { error } = await supabase
-          .from("bookings")
-          .update({ updated_at: new Date().toISOString() })
-          .eq("id", activeQueue.id);
-          
-        if (!error) {
-          createLog('CALL', `Panggil ulang antrean ${activeQueue.booking_number}`);
-          await panggilSuara(activeQueue.booking_number); // Tunggu proses suara
-          toast.info(`Panggil ulang ${activeQueue.booking_number} terkirim`);
+        setIsCalling(true);
+        try {
+          const { error } = await supabase
+            .from("bookings")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", activeQueue.id);
+            
+          if (!error) {
+            createLog('CALL', `Panggil ulang antrean ${activeQueue.booking_number}`);
+            await panggilSuara(activeQueue.booking_number);
+            toast.info(`Panggil ulang ${activeQueue.booking_number} terkirim`);
+          }
+        } finally {
+          setIsCalling(false);
         }
-        setIsCalling(false); // Selesai loading
 
       } else if (type === "SWAP" && targetId && activeQueue) {
         const target = bookings.find((b) => b.id === targetId);
@@ -265,13 +290,19 @@ export default function ManajemenAntrean() {
           supabase.from("bookings").update({ status: "waiting", updated_at: new Date().toISOString() }).eq("id", activeQueue.id),
           supabase.from("bookings").update({ status: "in_progress", updated_at: new Date().toISOString() }).eq("id", target.id),
         ]);
-        if (!res1.error && !res2.error) {
-          createLog('SYSTEM', `Skip antrean ${activeQueue.booking_number} ke ${target.booking_number}`);
-          await panggilSuara(target.booking_number);
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          isSwappingRef.current = false;
-          await fetchData();
+        if (res1.error || res2.error) {
+          throw new Error(res1.error?.message || res2.error?.message || "Gagal swap antrean");
         }
+
+        createLog('SYSTEM', `Skip antrean ${activeQueue.booking_number} ke ${target.booking_number}`);
+        
+        // KIRIM WA UNTUK TARGET BARU
+        sendWaNotification(target.visitor_phone, target.booking_number);
+
+        await panggilSuara(target.booking_number);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        isSwappingRef.current = false;
+        await fetchData();
       }
     } catch (error: any) {
       createLog('ERROR', `Gagal aksi ${type}: ${error.message}`, 'error');
@@ -371,7 +402,7 @@ export default function ManajemenAntrean() {
             <div>
               <p className="text-xs font-black text-slate-500 uppercase tracking-widest">
                 {services.find((s) => s.id === selectedServiceId)?.name}
-                {activeQueue && <span className="text-indigo-400 ml-2 font-mono text-sm">• {activeQueue.booking_time}</span>}
+                {activeQueue && <span className="text-indigo-400 ml-2 font-mono text-sm">| {activeQueue.booking_time}</span>}
               </p>
               <h1 className="text-6xl font-black text-white font-mono leading-none tracking-tighter">{activeQueue?.booking_number || "---"}</h1>
             </div>
@@ -401,7 +432,7 @@ export default function ManajemenAntrean() {
                       {waitingOnly.length === 0 ? <p className="text-xs text-slate-500 italic text-center py-10 uppercase font-black">Tidak ada antrean menunggu</p> : 
                         waitingOnly.map((b) => (
                           <button key={b.id} onClick={() => handleAction("SWAP", b.id)} className="w-full p-4 bg-slate-950 hover:bg-indigo-600/20 border border-slate-800 rounded-2xl flex justify-between items-center transition-all group">
-                            <div className="text-left"><p className="text-2xl font-mono font-black text-white group-hover:text-indigo-400">{b.booking_number}</p><p className="text-xs text-slate-500 font-black uppercase tracking-widest">{b.visitor_name} • {b.booking_time}</p></div>
+                            <div className="text-left"><p className="text-2xl font-mono font-black text-white group-hover:text-indigo-400">{b.booking_number}</p><p className="text-xs text-slate-500 font-black uppercase tracking-widest">{b.visitor_name} | {b.booking_time}</p></div>
                             <div className="bg-slate-900 p-2 rounded-lg group-hover:bg-indigo-600/30"><UserCheck className="text-slate-600 group-hover:text-indigo-400" size={24} /></div>
                           </button>
                         ))
@@ -441,7 +472,6 @@ export default function ManajemenAntrean() {
         </div>
 
         <div className="flex-1 grid grid-cols-2 gap-6 min-h-0 overflow-hidden">
-          {/* TABLE 1: DAFTAR TUNGGU */}
           <div className="bg-slate-900/40 border border-slate-800 rounded-[2rem] flex flex-col shadow-xl overflow-hidden">
             <div className="h-14 border-b border-slate-800 bg-indigo-600/5 flex justify-between items-center px-6 shrink-0">
               <h3 className="font-black uppercase text-sm text-indigo-400 tracking-wider">Daftar Tunggu</h3>
@@ -459,7 +489,7 @@ export default function ManajemenAntrean() {
                   </tr>
                 </thead>
                 <tbody>
-                  {waitingListDisplay.slice((pageWaiting - 1) * 4, pageWaiting * 4).map((b) => (
+                  {waitingListDisplay.slice((pageWaiting - 1) * itemsPerWaiting, pageWaiting * itemsPerWaiting).map((b) => (
                     <tr key={b.id} className={`h-[75px] border-b border-slate-800/50 ${b.status === "in_progress" ? "bg-indigo-600/10" : ""}`}>
                       <td className="px-5">
                         <Badge variant="outline" className="border-indigo-500/30 text-indigo-400 font-mono text-sm px-2 py-1">
@@ -494,11 +524,10 @@ export default function ManajemenAntrean() {
             <div className="h-14 border-t border-slate-800 flex justify-between bg-slate-950/50 items-center px-6 shrink-0">
               <Button disabled={pageWaiting === 1} onClick={() => setPageWaiting((p) => p - 1)} className="h-9 w-9 bg-slate-900 rounded-lg border border-slate-800 hover:bg-indigo-600 transition-all active:translate-y-[2px]"><ChevronLeft size={20} /></Button>
               <span className="text-sm font-black text-slate-600 uppercase">Hal {pageWaiting}</span>
-              <Button disabled={pageWaiting * 4 >= waitingListDisplay.length} onClick={() => setPageWaiting((p) => p + 1)} className="h-9 w-9 bg-slate-900 rounded-lg border border-slate-800 hover:bg-indigo-600 transition-all active:translate-y-[2px]"><ChevronRight size={20} /></Button>
+              <Button disabled={pageWaiting * itemsPerWaiting >= waitingListDisplay.length} onClick={() => setPageWaiting((p) => p + 1)} className="h-9 w-9 bg-slate-900 rounded-lg border border-slate-800 hover:bg-indigo-600 transition-all active:translate-y-[2px]"><ChevronRight size={20} /></Button>
             </div>
           </div>
 
-          {/* TABLE 2: RIWAYAT LAYANAN */}
           <div className="bg-slate-900/40 border border-slate-800 rounded-[2rem] flex flex-col shadow-xl overflow-hidden">
             <div className="h-14 border-b border-slate-800 bg-slate-950 flex items-center px-6 shrink-0">
               <h3 className="font-black uppercase text-sm text-slate-500 tracking-wider">Riwayat Layanan</h3>
@@ -514,7 +543,7 @@ export default function ManajemenAntrean() {
                   </tr>
                 </thead>
                 <tbody>
-                  {historyList.slice((pageHistory - 1) * 4, pageHistory * 4).map((b) => (
+                  {historyList.slice((pageHistory - 1) * itemsPerHistory, pageHistory * itemsPerHistory).map((b) => (
                     <tr key={b.id} className="h-[75px] border-b border-slate-800/50 hover:bg-white/[0.01]">
                       <td className="px-5">
                         <div className="flex items-center gap-2">
@@ -529,7 +558,7 @@ export default function ManajemenAntrean() {
                             Ket: {b.notes || b.cancel_reason || "Tanpa alasan"}
                           </p>
                         ) : (
-                           <div className="h-4" /> 
+                            <div className="h-4" /> 
                         )}
                       </td>
                       <td className="px-5 text-center">
@@ -557,7 +586,7 @@ export default function ManajemenAntrean() {
             <div className="h-14 border-t border-slate-800 flex justify-between bg-slate-950/50 items-center px-6 shrink-0">
               <Button disabled={pageHistory === 1} onClick={() => setPageHistory((p) => p - 1)} className="h-9 w-9 bg-slate-900 rounded-lg border border-slate-800 hover:bg-indigo-600 transition-all active:translate-y-[2px]"><ChevronLeft size={20} /></Button>
               <span className="text-sm font-black text-slate-600 uppercase">Hal {pageHistory}</span>
-              <Button disabled={pageHistory * 4 >= historyList.length} onClick={() => setPageHistory((p) => p + 1)} className="h-9 w-9 bg-slate-900 rounded-lg border border-slate-800 hover:bg-indigo-600 transition-all active:translate-y-[2px]"><ChevronRight size={20} /></Button>
+              <Button disabled={pageHistory * itemsPerHistory >= historyList.length} onClick={() => setPageHistory((p) => p + 1)} className="h-9 w-9 bg-slate-900 rounded-lg border border-slate-800 hover:bg-indigo-600 transition-all active:translate-y-[2px]"><ChevronRight size={20} /></Button>
             </div>
           </div>
         </div>
@@ -575,3 +604,4 @@ export default function ManajemenAntrean() {
     </div>
   );
 }
+
